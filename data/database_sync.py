@@ -79,10 +79,10 @@ class DatabaseSync:
         load_dotenv()
         conn = psycopg2.connect(
             dbname=os.getenv('DB_NAME'),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            host=os.getenv("DB_HOST"),
-            port=os.getenv("DB_PORT")
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD'),
+            host=os.getenv('DB_HOST'),
+            port=os.getenv('DB_PORT')
         )
         cur = conn.cursor()
 
@@ -122,12 +122,12 @@ class DatabaseSync:
 
     @staticmethod
     def _get_coin_id(coin_pair: str, cur: cursor) -> int:
-        cur.execute("SELECT coin_id FROM coin_pair WHERE symbol = %s;", (coin_pair,))
+        cur.execute('SELECT coin_id FROM coin_pair WHERE symbol = %s;', (coin_pair,))
         result = cur.fetchone()
         if result:
             return result[0]
         else:
-            cur.execute("INSERT INTO coin_pair(symbol) VALUES (%s) RETURNING coin_id", (coin_pair,))
+            cur.execute('INSERT INTO coin_pair(symbol) VALUES (%s) RETURNING coin_id', (coin_pair,))
             return cur.fetchone()[0]
     
     @staticmethod
@@ -163,76 +163,86 @@ class DatabaseSync:
                 DatabaseSync.url_to_db(url)
                 curr += timedelta(days=1)
 
+
+
     @staticmethod
     def url_to_db(url: str):
         load_dotenv()
         conn = psycopg2.connect(
             dbname=os.getenv('DB_NAME'),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            host=os.getenv("DB_HOST"),
-            port=os.getenv("DB_PORT")
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD'),
+            host=os.getenv('DB_HOST'),
+            port=os.getenv('DB_PORT')
         )
         cur = conn.cursor()
 
         coin_pair = url.split('/')[-1].split('-')[0]
-        type = url.split('/')[4]
+        trade_type = url.split('/')[4]
         date_str = '-'.join(url.split('/')[-1].split('-')[-3:])[:-4]
 
         coin_id = DatabaseSync._get_coin_id(coin_pair, cur)
 
         try:
-            response = requests.get(url)
+            response = requests.get(url, stream=True)
             response.raise_for_status()
 
-            with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded_data = io.BytesIO()
+
+            with tqdm(total=total_size, unit='B', unit_scale=True, desc=f'Downloading ({coin_pair}, {trade_type}) on {date_str}') as pbar:
+                for chunk in response.iter_content(chunk_size=8192):
+                    downloaded_data.write(chunk)
+                    pbar.update(len(chunk))
+
+            downloaded_data.seek(0)
+
+            with zipfile.ZipFile(downloaded_data) as z:
                 file_name = z.namelist()[0]
+
                 with z.open(file_name) as csv_file:
-                    df = pd.read_csv(csv_file, header=None)
-                    df.columns = ['trade_id', 'price', 'quantity', 'quoteqty', 'timestamp', 'is_buyer_maker', 'best_match']
-                    df['trade_time'] = pd.to_datetime(df['timestamp'], unit='us')
-                    df['side'] = ~df['is_buyer_maker']
-
-                    rows = df[['trade_id', 'trade_time', 'price', 'quantity', 'side', 'best_match']].values.tolist()
-                    rows = [(r[0], coin_id, r[1], r[2], r[3], r[4], r[5], type) for r in rows]
-
                     chunk_size = 5000
-                    total_rows = len(rows)
-                    num_chunks = (total_rows + chunk_size - 1) // chunk_size  # Calculate total number of chunks
+                    chunk_iterator = pd.read_csv(csv_file, header=None, chunksize=chunk_size)
 
-                    with tqdm(total=num_chunks, desc="Inserting Chunks", unit="chunk") as pbar:
-                        for i in range(0, total_rows, chunk_size):
-                            chunk = rows[i:i + chunk_size]
+                    with tqdm(total=None, desc=f'Inserting ({coin_pair}, {trade_type}) on {date_str}', unit=' chunks') as pbar:
+                        for chunk_df in chunk_iterator:
+                            chunk_df.columns = ['trade_id', 'price', 'quantity', 'quoteqty', 'timestamp', 'is_buyer_maker', 'best_match']
+                            chunk_df['trade_time'] = pd.to_datetime(chunk_df['timestamp'], unit='us')
+                            chunk_df['side'] = ~chunk_df['is_buyer_maker']
+
+                            rows = chunk_df[['trade_id', 'trade_time', 'price', 'quantity', 'side', 'best_match']].values.tolist()
+                            rows = [(r[0], coin_id, r[1], r[2], r[3], r[4], r[5], trade_type) for r in rows]
 
                             insert_query = """
-                            INSERT INTO trades (
-                                trade_id, coin_id, trade_time, price, quantity, side, best_match, trade_type
-                            ) VALUES %s
-                            ON CONFLICT (trade_id) DO NOTHING;
+                                INSERT INTO trades (
+                                    trade_id, coin_id, trade_time, price, quantity, side, best_match, trade_type
+                                ) VALUES %s
+                                ON CONFLICT (trade_id) DO NOTHING;
                             """
 
-                            execute_values(cur, insert_query, chunk)
+                            execute_values(cur, insert_query, rows)
                             pbar.update(1)
 
             conn.commit()
-            print(f'Successfully committed ({coin_pair}, {type}) on {date_str}.')
+            print(f'Successfully committed ({coin_pair}, {trade_type}) on {date_str}.\n')
             
         except Exception as e:
-            print(f"Error processing {url}: {e}")
+            print(f'Error processing {url}: {e}')
             conn.rollback()
         finally:
             cur.close()
             conn.close()
+
 
     @staticmethod
     def get_existing_pairings() -> list[tuple[str, str]]:
         load_dotenv()
         conn = psycopg2.connect(
             dbname=os.getenv('DB_NAME'),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            host=os.getenv("DB_HOST"),
-            port=os.getenv("DB_PORT")
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD'),
+            host=os.getenv('DB_HOST'),
+            port=os.getenv('DB_PORT')
         )
         cur = conn.cursor()
 
