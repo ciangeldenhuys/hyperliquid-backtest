@@ -12,6 +12,7 @@ import pandas as pd
 import io
 from typing import Optional, List, Tuple
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
 
 class DatabaseSync:
     @staticmethod
@@ -101,7 +102,7 @@ class DatabaseSync:
 
     @staticmethod
     def sync_csv_to_db(coin_pair: str, type: str, filepath: str, cur: cursor):
-        coin_id = DatabaseSync._get_coin_id(coin_pair, cur)
+        coin_id = DatabaseSync._get_coin_id(coin_pair)
 
         df = pd.read_csv(filepath, header=None)
         df.columns = ['trade_id', 'price', 'quantity', 'quoteqty', 'timestamp', 'is_buyer_maker', 'best_match']
@@ -121,14 +122,30 @@ class DatabaseSync:
         execute_values(cur, insert_query, rows)
 
     @staticmethod
-    def _get_coin_id(coin_pair: str, cur: cursor) -> int:
+    def _get_coin_id(coin_pair: str) -> int:
+        load_dotenv()
+        conn = psycopg2.connect(
+            dbname=os.getenv('DB_NAME'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD'),
+            host=os.getenv('DB_HOST'),
+            port=os.getenv('DB_PORT')
+        )
+        cur = conn.cursor()
+
         cur.execute('SELECT coin_id FROM coin_pair WHERE symbol = %s;', (coin_pair,))
         result = cur.fetchone()
         if result:
-            return result[0]
+            ret = result[0]
         else:
             cur.execute('INSERT INTO coin_pair(symbol) VALUES (%s) RETURNING coin_id', (coin_pair,))
-            return cur.fetchone()[0]
+            ret = cur.fetchone()[0]
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return ret
     
     @staticmethod
     def download_binance_to_db(coin_pairs: Optional[List[Tuple[str, str]]]=None, start=datetime.now() - timedelta(days=1), end=datetime.now()):
@@ -163,25 +180,19 @@ class DatabaseSync:
                 DatabaseSync.url_to_db(url)
                 curr += timedelta(days=1)
 
-
-
     @staticmethod
     def url_to_db(url: str):
         load_dotenv()
-        conn = psycopg2.connect(
-            dbname=os.getenv('DB_NAME'),
-            user=os.getenv('DB_USER'),
-            password=os.getenv('DB_PASSWORD'),
-            host=os.getenv('DB_HOST'),
-            port=os.getenv('DB_PORT')
-        )
-        cur = conn.cursor()
 
         coin_pair = url.split('/')[-1].split('-')[0]
         trade_type = url.split('/')[4]
-        date_str = '-'.join(url.split('/')[-1].split('-')[-3:])[:-4]
+        date_str = '-'.join(url.split('/')[-1].split('-')[2:])[:-4]
+        coin_id = DatabaseSync._get_coin_id(coin_pair)
 
-        coin_id = DatabaseSync._get_coin_id(coin_pair, cur)
+        # Settings
+        chunk_size = 5000
+        buffer_limit = 50000  # Adjusted to 20,000 to increase task frequency
+        max_workers = 16  # Increased to 16 to better utilize CPU
 
         try:
             response = requests.get(url, stream=True)
@@ -190,6 +201,7 @@ class DatabaseSync:
             total_size = int(response.headers.get('content-length', 0))
             downloaded_data = io.BytesIO()
 
+            # Download with progress bar
             with tqdm(total=total_size, unit='B', unit_scale=True, desc=f'Downloading ({coin_pair}, {trade_type}) on {date_str}') as pbar:
                 for chunk in response.iter_content(chunk_size=8192):
                     downloaded_data.write(chunk)
@@ -197,41 +209,75 @@ class DatabaseSync:
 
             downloaded_data.seek(0)
 
+            # Extract and process the CSV
             with zipfile.ZipFile(downloaded_data) as z:
                 file_name = z.namelist()[0]
 
                 with z.open(file_name) as csv_file:
-                    chunk_size = 5000
                     chunk_iterator = pd.read_csv(csv_file, header=None, chunksize=chunk_size)
+                    buffer = []
 
-                    with tqdm(total=None, desc=f'Inserting ({coin_pair}, {trade_type}) on {date_str}', unit=' chunks') as pbar:
-                        for chunk_df in chunk_iterator:
-                            chunk_df.columns = ['trade_id', 'price', 'quantity', 'quoteqty', 'timestamp', 'is_buyer_maker', 'best_match']
-                            chunk_df['trade_time'] = pd.to_datetime(chunk_df['timestamp'], unit='us')
-                            chunk_df['side'] = ~chunk_df['is_buyer_maker']
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        with tqdm(total=None, desc=f'Inserting ({coin_pair}, {trade_type}) on {date_str}', unit=' chunks') as pbar:
+                            for chunk_df in chunk_iterator:
+                                chunk_df.columns = ['trade_id', 'price', 'quantity', 'quoteqty', 'timestamp', 'is_buyer_maker', 'best_match']
+                                chunk_df['trade_time'] = pd.to_datetime(chunk_df['timestamp'], unit='us')
+                                chunk_df['side'] = ~chunk_df['is_buyer_maker']
 
-                            rows = chunk_df[['trade_id', 'trade_time', 'price', 'quantity', 'side', 'best_match']].values.tolist()
-                            rows = [(r[0], coin_id, r[1], r[2], r[3], r[4], r[5], trade_type) for r in rows]
+                                rows = chunk_df[['trade_id', 'trade_time', 'price', 'quantity', 'side', 'best_match']].values.tolist()
+                                rows = [(r[0], coin_id, r[1], r[2], r[3], r[4], r[5], trade_type) for r in rows]
 
-                            insert_query = """
-                                INSERT INTO trades (
-                                    trade_id, coin_id, trade_time, price, quantity, side, best_match, trade_type
-                                ) VALUES %s
-                                ON CONFLICT (trade_id) DO NOTHING;
-                            """
+                                buffer.extend(rows)
 
-                            execute_values(cur, insert_query, rows)
-                            pbar.update(1)
+                                # Process buffer when the limit is reached
+                                if len(buffer) >= buffer_limit:
+                                    # Submit each buffer as a separate task
+                                    executor.submit(DatabaseSync.bulk_insert, buffer)
+                                    buffer = []  # Reset buffer
+
+                                pbar.update(1)
+
+                            # Process any remaining buffer
+                            if buffer:
+                                executor.submit(DatabaseSync.bulk_insert, buffer)
+
+            print(f'Successfully committed ({coin_pair}, {trade_type}) on {date_str}.\n')
+
+        except Exception as e:
+            print(f'Error processing {url}: {e}\n')
+
+    @staticmethod
+    def bulk_insert(rows):
+        """
+        Each bulk_insert call opens its own database connection.
+        """
+        load_dotenv()
+        try:
+            conn = psycopg2.connect(
+                dbname=os.getenv('DB_NAME'),
+                user=os.getenv('DB_USER'),
+                password=os.getenv('DB_PASSWORD'),
+                host=os.getenv('DB_HOST'),
+                port=os.getenv('DB_PORT')
+            )
+            with conn.cursor() as cur:
+                with io.StringIO() as buffer:
+                    for row in rows:
+                        buffer.write(','.join(map(str, row)) + '\n')
+                    buffer.seek(0)
+                    cur.copy_expert("""
+                        COPY trades (trade_id, coin_id, trade_time, price, quantity, side, best_match, trade_type)
+                        FROM STDIN WITH CSV;
+                    """, buffer)
 
             conn.commit()
-            print(f'Successfully committed ({coin_pair}, {trade_type}) on {date_str}.\n')
-            
+
         except Exception as e:
-            print(f'Error processing {url}: {e}')
-            conn.rollback()
+            print(f"Error in bulk_insert: {e}")
+
         finally:
-            cur.close()
-            conn.close()
+            if 'conn' in locals():
+                conn.close()
 
 
     @staticmethod
@@ -267,4 +313,4 @@ if __name__ == '__main__':
         ('ADAUSDT', 'spot'),
         ('SUIUSDT', 'spot'),
     ]
-    DatabaseSync.download_binance_to_db(download_list, datetime(2025, 1, 1), datetime.now())
+    DatabaseSync.download_binance_to_db(download_list, datetime(2025, 2, 1), datetime.now())
