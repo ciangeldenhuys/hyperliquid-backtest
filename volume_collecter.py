@@ -43,6 +43,7 @@ class VolumeCollecter:
                     continue
                     
                 if msg.get("channel") == "trades":
+                    print("JSON", msg)
                     for slot in msg["data"]:
                 
 
@@ -53,8 +54,10 @@ class VolumeCollecter:
 
                         if slot["side"] == "A":
                             self.sell_usd += usd
+                            print("sell", self.sell_usd)
                         if slot["side"] == "B":
                             self.buy_usd += usd
+                            print("buy", self.buy_usd)
 
     async def flush(self):
         tz = ZoneInfo("America/Los_Angeles")
@@ -66,8 +69,8 @@ class VolumeCollecter:
                 self.sell_volume_buffer.append(self.sell_usd)
                 print("Time:", datetime.now(tz))
                 print("Buffer size:", len(self.buy_volume_buffer))
-                print("Buy buffer:", [f'{x:.2f}' for x in self.buy_volume_buffer])
-                print("Sell buffer:", [f'{x:.2f}' for x in self.sell_volume_buffer])
+                print("Buy buffer:", list(self.buy_volume_buffer))
+                print("Sell buffer:", list(self.sell_volume_buffer))
                 self.buy_usd = 0.0
                 self.sell_usd = 0.0
                 self.last_clear = current_seconds
