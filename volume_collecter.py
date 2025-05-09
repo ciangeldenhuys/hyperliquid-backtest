@@ -1,126 +1,85 @@
-import os
-from dotenv import load_dotenv
-from kucoin.client import Client
 from datetime import datetime
 import asyncio
 import json
 import websockets
-import csv
-from zoneinfo import ZoneInfo  # requires Python 3.9+
-from collections import deque
+from zoneinfo import ZoneInfo
 from collections import deque
 
-
-# Load variables from .env file
-load_dotenv()
-
-# Access credentialshttps://kucoin.onelink.me/iqEP/xy0tdqd1
-API_KEY = os.getenv("KUCOIN_API_KEY")
-API_SECRET = os.getenv("KUCOIN_API_SECRET")
-API_PASSPHRASE = os.getenv("KUCOIN_API_PASSPHRASE")
-API_KEY_VERSION = os.getenv("KUCOIN_API_KEY_VERSION")
-
-client = Client(API_KEY, API_SECRET, API_PASSPHRASE)
 
 class VolumeCollecter:
 
-    def __init__(self, symbol: str):
-        self.symbol = symbol.lower()
+    def __init__(self, coin: str):
+        self.coin = coin
         self.buy_volume_buffer = deque(maxlen=2880)
         self.sell_volume_buffer = deque(maxlen=2880)
+        self.buy_usd = 0.0
+        self.sell_usd = 0.0
+        self.last_clear = -1
 
     
-    async def _stream_binance_trades(self):#, outfile: str):
-        """
-        Stream <symbol>@trade from Binance, aggregate per‑minute BUY / SELL USD
-        and append to `outfile` continuously.
-        Use Ctrl‑C to stop.
-        """
+    async def stream_HL_trades(self):
 
-        wss    = f"wss://stream.binance.com:9443/ws/{self.symbol}@trade"
+        HL_WSS = "wss://api.hyperliquid.xyz/ws" 
 
-        current_bucket = None
-        buy_usd = sell_usd = 0.0
+        async with websockets.connect(HL_WSS, ping_interval=1, ping_timeout=10) as ws:
+            print("connected to", HL_WSS)
 
-        def flush():
-            nonlocal current_bucket, buy_usd, sell_usd
-            if current_bucket is None:
-                return
-            row = [current_bucket.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"),
-                   round(buy_usd, 8), round(sell_usd, 8)]
-            
-            print("Buffer size:", len(self.buy_volume_buffer))
-            print("Buy buffer:", list(self.buy_volume_buffer)[-5:])  # last 5 entries
-            print("Sell buffer:", list(self.sell_volume_buffer)[-5:])  # last 5 entries
-            # append to CSV
-            # write_header = not os.path.exists(outfile)
-            # with open(outfile, "a", newline="") as f:
-            #     w = csv.writer(f)
-            #     if write_header:
-            #         w.writerow(["time", "buy_usd", "sell_usd"])
-            #     w.writerow(row)
+            # Send subscription message
+            subscription_message = {
+                "method": "subscribe",
+                "subscription": {
+                    "type": "trades",
+                    "coin": self.coin
+                }
+            }
+            await ws.send(json.dumps(subscription_message))
+            print(f"Subscribed to trades for index: {self.coin}")
 
-            # Update in-memory buffers
-            self.buy_volume_buffer.append(row[1])
-            self.sell_volume_buffer.append(row[2])
-
-            # Reset counters
-            buy_usd = sell_usd = 0.0
-            current_bucket = None
-
-        async with websockets.connect(wss, ping_interval=20, ping_timeout=10) as ws:
-            print("connected to", wss)
             async for m in ws:
                 msg = json.loads(m)
-                price = float(msg["p"])
-                size  = float(msg["q"])
-                usd   = price * size
-                t = datetime.fromtimestamp(msg["T"]/1000, tz=ZoneInfo("America/Los_Angeles"))
-                bucket = t.replace(second=(0 if t.second < 30 else 30), microsecond=0)
+        
+                if msg.get("channel") == "subscriptionResponse":
+                    print("Subscription confirmed:", msg)
+                    continue
+                    
+                if msg.get("channel") == "trades":
+                    for slot in msg["data"]:
+                
+
+                        price = float(slot["px"])
+                        size  = float(slot["sz"])
+                        usd   = price * size
 
 
-                if current_bucket is None:
-                    current_bucket = bucket
-                elif bucket > current_bucket: 
-                    flush()
-                    current_bucket = bucket
+                        if slot["side"] == "A":
+                            self.sell_usd += usd
+                        if slot["side"] == "B":
+                            self.buy_usd += usd
 
-                # side: msg["m"] True taker SELL, False taker BUY (I think)
-                if msg["m"]:
-                    sell_usd += usd
-                else:
-                    buy_usd  += usd
+    async def flush(self):
+        tz = ZoneInfo("America/Los_Angeles")
+        
+        while True:
+            current_seconds = datetime.now(tz).second
+            if (current_seconds == 30 or current_seconds == 0) and current_seconds != self.last_clear:
+                self.buy_volume_buffer.append(self.buy_usd)
+                self.sell_volume_buffer.append(self.sell_usd)
+                print("Time:", datetime.now(tz))
+                print("Buffer size:", len(self.buy_volume_buffer))
+                print("Buy buffer:", [f'{x:.2f}' for x in self.buy_volume_buffer])
+                print("Sell buffer:", [f'{x:.2f}' for x in self.sell_volume_buffer])
+                self.buy_usd = 0.0
+                self.sell_usd = 0.0
+                self.last_clear = current_seconds
+                
+            await asyncio.sleep(0.1)
+    
+    async def run(self):
+        await asyncio.gather(self.stream_HL_trades(), self.flush())
     
     
-    def binance_live(self):#, outfile: str)
-        """
-        Blocking call: runs the asyncio event loop, prints and appends
-        one CSV row per closed minute bucket.
-        """
-        # print("Saving to:", os.path.abspath(outfile))
-        async def runner():                       # nested so we can flush
-            try:
-                await self._stream_binance_trades()
-            finally:
-                # make sure the last minute is flushed on Ctrl‑C
-                pass                               # flush happens inside _stream
-
-        try:
-            asyncio.run(runner())
-        except KeyboardInterrupt:
-            print("\n stopped by user")
-
-
-if __name__ == '__main__':
-    symbol1 = "ETHUSDC"
-
-    print(f"    Starting live Binance stream for {symbol1} …")
-    print("    Console     : prints one line every 30 seconds\n")
-
-    try:
-        vc = VolumeCollecter(symbol1)
-        vc.binance_live()
-    except Exception as e:
-        print("❌ stream terminated:", e)
+if __name__ == "__main__":
+    vc = VolumeCollecter("@151")       # ETH/USDC spot asset
+    asyncio.run(vc.run())
 
 
