@@ -1,3 +1,0 @@
-DROP TABLE trades;
-DROP TABLE coin_pair;
-DROP TYPE TRADETYPE;
