@@ -10,7 +10,6 @@ from dateutil.relativedelta import relativedelta
 import asyncio
 import aiohttp
 from dotenv import load_dotenv
-from tqdm.asyncio import tqdm as tqdm_async
 
 class DatabaseSync:
 
