@@ -1,7 +1,7 @@
-from datetime import datetime
-import time
+from datetime import datetime, timezone
 
-while True:
-    now = datetime.now()
-    print(f"Seconds: {now.second}")
-    time.sleep(0.1)  # 10ms sleep for more granular observation
+timestamp_ms = 1746838085203
+timestamp_s = timestamp_ms / 1000
+date_time = datetime.fromtimestamp(timestamp_s, tz=timezone.utc)
+
+print(date_time)

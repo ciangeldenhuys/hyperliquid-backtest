@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 import json
 import websockets
@@ -15,6 +15,7 @@ class VolumeCollecter:
         self.buy_usd = 0.0
         self.sell_usd = 0.0
         self.last_clear = -1
+        self.last_trade_price = 0.0
 
     
     async def stream_HL_trades(self):
@@ -45,19 +46,21 @@ class VolumeCollecter:
                 if msg.get("channel") == "trades":
                     print("JSON", msg)
                     for slot in msg["data"]:
-                
 
-                        price = float(slot["px"])
-                        size  = float(slot["sz"])
-                        usd   = price * size
+                        if abs(int(datetime.now(tz = timezone.utc).timestamp() * 1000 - slot["time"])) <= 10000:
 
+                            price = float(slot["px"])
+                            size  = float(slot["sz"])
+                            usd   = price * size
 
-                        if slot["side"] == "A":
-                            self.sell_usd += usd
-                            print("sell", self.sell_usd)
-                        if slot["side"] == "B":
-                            self.buy_usd += usd
-                            print("buy", self.buy_usd)
+                            self.last_trade_price = price
+                    
+                            if slot["side"] == "A":
+                                self.sell_usd += usd
+                                print("sell", self.sell_usd)
+                            if slot["side"] == "B":
+                                self.buy_usd += usd
+                                print("buy", self.buy_usd)
 
     async def flush(self):
         tz = ZoneInfo("America/Los_Angeles")
@@ -82,7 +85,7 @@ class VolumeCollecter:
     
     
 if __name__ == "__main__":
-    vc = VolumeCollecter("@151")       # ETH/USDC spot asset
+    vc = VolumeCollecter("@151")
     asyncio.run(vc.run())
 
 
