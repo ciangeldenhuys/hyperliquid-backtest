@@ -12,8 +12,18 @@ import aiohttp
 from dotenv import load_dotenv
 
 class DatabaseSync:
+    """
+    Sync data from Binance to the Postgres database. Provide DB credentials in .env file.
+    Does not currently support data sync for futures or options.
+    """
 
-    # --- Database AsyncConnection Utils --- #
+    # --- Configure asyncio for psycopg3 --- #
+
+    asyncio.set_event_loop_policy(
+        asyncio.WindowsSelectorEventLoopPolicy()
+    )
+
+    # --- Load Database Credentials --- #
 
     load_dotenv()
     connection_str = f"""
@@ -24,34 +34,67 @@ class DatabaseSync:
         port={os.getenv('DB_PORT')}
     """
     pool = AsyncConnectionPool(connection_str, open=False)
-    
-    asyncio.set_event_loop_policy(
-        asyncio.WindowsSelectorEventLoopPolicy()
-    )
+
+    # --- Database AsyncConnection Utils --- #
 
     @staticmethod
-    async def get_async_connection() -> Coroutine[None, None, AsyncConnection]:
+    async def _get_async_connection() -> AsyncConnection:
+        """
+        Gets an async connection from the async connection pool.
+
+        Returns:
+            conn (AsyncConnection): An asynchronous connection from the pool.
+        """
         return await DatabaseSync.pool.getconn()
 
     @staticmethod
-    async def release_async_connection(conn: AsyncConnection):
+    async def _release_async_connection(conn: AsyncConnection):
+        """
+        Returns the given async connection to the pool.
+
+        Parameters:
+            conn (AsyncConnection): Connection to return to the pool.
+        """
         await DatabaseSync.pool.putconn(conn)
 
     # --- Database Sync Utils --- #
 
     @staticmethod
-    def get_connection() -> Connection:
+    def _get_connection() -> Connection:
+        """
+        Gets a regular connection to the database, not from a pool.
+
+        Returns:
+            conn (Connection): A synchronous connection to the database.
+        """
         return connect(DatabaseSync.connection_str)
     
     @staticmethod
-    def release_connection(conn: Connection):
+    def _release_connection(conn: Connection):
+        """
+        Closes the given connection.
+
+        Parameters:
+            conn (Connection): Database connection to close.
+        """
         conn.close()
 
     # --- Existing Coins Utils --- #
 
     @staticmethod
     def _get_coin_id(coin_pair: str) -> int:
-        conn = DatabaseSync.get_connection()
+        """        
+        Gets the coin_id for the given coin pairing from the database.
+
+        Inserts the coin pairing if it is not already in the database and creates a coin_id.
+
+        Parameters:
+            coin_pair (str): Coin pair to return the ID for.
+
+        Returns:
+            coin_id (int): ID of the given coin in the database.
+        """
+        conn = DatabaseSync._get_connection()
         with conn.cursor() as cur:
             cur.execute('SELECT coin_id FROM coin_pair WHERE symbol = %s;', (coin_pair,))
             result = cur.fetchone()
@@ -61,12 +104,18 @@ class DatabaseSync:
                 cur.execute('INSERT INTO coin_pair(symbol) VALUES (%s) RETURNING coin_id', (coin_pair,))
                 ret = cur.fetchone()[0]
         conn.commit()
-        DatabaseSync.release_connection(conn)
+        DatabaseSync._release_connection(conn)
         return ret
     
     @staticmethod
     def _get_existing_pairings() -> list[tuple[str, str]]:
-        conn = DatabaseSync.get_connection()
+        """
+        Gets all the existing (coin_pair, trade_type) tuples in the database.
+
+        Returns:
+            existing_pairings (list[tuple[str, str]]): A list of (coin_pair, trade_type) tuples already in the database.
+        """
+        conn = DatabaseSync._get_connection()
         with conn.cursor() as cur:
             query = """
                 SELECT DISTINCT cp.symbol, t.trade_type
@@ -76,14 +125,17 @@ class DatabaseSync:
             cur.execute(query)
             pairings = cur.fetchall()
         conn.commit()
-        DatabaseSync.release_connection(conn)
+        DatabaseSync._release_connection(conn)
         return pairings
     
     # --- Mass Insert Utils --- #
 
     @staticmethod
     def _drop_index():
-        conn = DatabaseSync.get_connection()
+        """
+        Removes the index from the database for quicker inserts.
+        """
+        conn = DatabaseSync._get_connection()
         cur = conn.cursor()
         try:
             cur.execute('DROP INDEX IF EXISTS trades_index;')
@@ -92,11 +144,14 @@ class DatabaseSync:
             print(f'Error dropping index: {e}')
         finally:
             cur.close()
-            DatabaseSync.release_connection(conn)
+            DatabaseSync._release_connection(conn)
 
     @staticmethod
     def _recreate_index():
-        conn = DatabaseSync.get_connection()
+        """
+        Reinstates the index after inserting data.
+        """
+        conn = DatabaseSync._get_connection()
         cur = conn.cursor()
         try:
             cur.execute('CREATE INDEX trades_index ON trades (coin_id, trade_time);')
@@ -105,11 +160,14 @@ class DatabaseSync:
             print(f'Error recreating index: {e}')
         finally:
             cur.close()
-            DatabaseSync.release_connection(conn)
+            DatabaseSync._release_connection(conn)
 
     @staticmethod
     def _drop_fk():
-        conn = DatabaseSync.get_connection()
+        """
+        Drops foreign key constraint for faster insert.
+        """
+        conn = DatabaseSync._get_connection()
         cur = conn.cursor()
         try:
             cur.execute('ALTER TABLE trades DROP CONSTRAINT coin_fk;')
@@ -118,11 +176,14 @@ class DatabaseSync:
             print(f'Error dropping foreign key: {e}')
         finally:
             cur.close()
-            DatabaseSync.release_connection(conn)
+            DatabaseSync._release_connection(conn)
 
     @staticmethod
     def _recreate_fk():
-        conn = DatabaseSync.get_connection()
+        """
+        Reinstates foreign key constraint after large insert.
+        """
+        conn = DatabaseSync._get_connection()
         cur = conn.cursor()
         try:
             cur.execute('ALTER TABLE trades ADD CONSTRAINT coin_fk FOREIGN KEY coin_id REFERENCES coin_pair(coin_id);')
@@ -132,12 +193,22 @@ class DatabaseSync:
             print(f'Error recreating foreign key: {e}')
         finally:
             cur.close()
-            DatabaseSync.release_connection(conn)
+            DatabaseSync._release_connection(conn)
+    
+    # --- Database Insert Implementation --- #
 
     @staticmethod
-    async def bulk_insert(rows):
+    async def _bulk_insert(rows: list[tuple[int, int, datetime, float, float, bool, bool, str]]):
+        """
+        Inserts all the provided rows into the database.
+
+        This method uses COPY, so does not check for primary key constraints. Must ensure no duplicate inserts before use.
+
+        Parameters:
+            rows (list[tuple[int, int, datetime, float, float, bool, bool, str]]): List of rows to insert to the trades table.
+        """
         try:
-            conn = await DatabaseSync.get_async_connection()
+            conn = await DatabaseSync._get_async_connection()
             async with conn.cursor() as cur:
                 copy_query = """
                     COPY trades (trade_id, coin_id, trade_time, price, quantity, side, best_match, trade_type)
@@ -155,10 +226,16 @@ class DatabaseSync:
             print(f"Error in bulk_insert: {e}")
             print(f"final threads: {DatabaseSync.thread_count}, final copied: {DatabaseSync.copy_count}")
         finally:
-            await DatabaseSync.release_async_connection(conn)
+            await DatabaseSync._release_async_connection(conn)
 
     @staticmethod
-    async def download_and_process(url: str):
+    async def _download_and_process(url: str):
+        """
+        Download data from the given url and copy it to the database concurrently in chunks.
+
+        Parameters:
+            url (str): The url to download a zipfile containing trade data from.
+        """
         trade_type = url.split('/')[4]
         coin_pair = url.split('/')[-1].split('-')[0]
         coin_id = DatabaseSync._get_coin_id(coin_pair)
@@ -198,7 +275,17 @@ class DatabaseSync:
                         await asyncio.gather(*tasks)
 
     @staticmethod
-    async def download_binance_to_db(coin_pairs, start, end):
+    async def _download_binance_to_db(coin_pairs: list[tuple[str, str]], start: datetime, end: datetime):
+        """
+        Loops all dates between start (inc.) and end (excl.) and downloads the data to the database.
+
+        Parameters:
+            coin_pairs (list[tuple[str, str]]): List of (coin_pair, trade_type) tuples to download.
+
+            start (datetime): Date (inc.) to start download from.
+
+            end (datetime): Date (excl.) to end download from.
+        """
         for pairing in coin_pairs:
             coin_pair, trade_type = pairing
             curr = start
@@ -207,37 +294,55 @@ class DatabaseSync:
                 stop = (start + relativedelta(months=1)).replace(day=1)
                 while curr < stop and curr < end:
                     url = f'https://data.binance.vision/data/{trade_type}/daily/trades/{coin_pair}/{coin_pair}-trades-{curr:%Y-%m-%d}.zip'
-                    await DatabaseSync.download_and_process(url)
+                    await DatabaseSync._download_and_process(url)
                     curr += timedelta(days=1)
 
             stop = end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             while curr < stop:
                 url = f'https://data.binance.vision/data/{trade_type}/monthly/trades/{coin_pair}/{coin_pair}-trades-{curr:%Y-%m}.zip'
-                await DatabaseSync.download_and_process(url)
+                await DatabaseSync._download_and_process(url)
                 curr += relativedelta(months=1)
 
             while curr < end:
                 url = f'https://data.binance.vision/data/{trade_type}/daily/trades/{coin_pair}/{coin_pair}-trades-{curr:%Y-%m-%d}.zip'
-                await DatabaseSync.download_and_process(url)
+                await DatabaseSync._download_and_process(url)
                 curr += timedelta(days=1)
 
     @staticmethod
-    async def async_calls(coin_pairs: list[tuple[str, str]], start: datetime, end: datetime, drop_index: bool):
+    async def _async_calls(coin_pairs: list[tuple[str, str]], start: datetime, end: datetime, drop_index: bool):
+        """
+        Makes all async function calls sequentially.
+        
+        Preps database for download before downloading anything by removing index/FK if specified.
+
+        FK dropping not currently implemented.
+
+        Parameters:
+            coin_pairs (list[tuple[str, str]]): List of (coin_pair, trade_type) tuples to download.
+
+            start (datetime): Date (inc.) to start download from.
+
+            end (datetime): Date (excl.) to end download from.
+
+            drop_index (bool): Whether index should be dropped before download.
+        """
         start = start.replace(hour=0, minute=0, second=0, microsecond=0)
         end = end.replace(hour=0, minute=0, second=0, microsecond=0)
         if coin_pairs == None:
             coin_pairs = DatabaseSync._get_existing_pairings()
         if drop_index:
             DatabaseSync._drop_index()
+            print('Removed index')
 
         await DatabaseSync.pool.open()
-        await DatabaseSync.download_binance_to_db(coin_pairs, start, end)
+        await DatabaseSync._download_binance_to_db(coin_pairs, start, end)
         await DatabaseSync.pool.close()
 
-        print('finished')
+        print('Successfully inserted all data.')
 
         if drop_index:
             DatabaseSync._recreate_index()
+            print('Recreated index.')
 
     @staticmethod
     def start_binance_download(
@@ -246,7 +351,19 @@ class DatabaseSync:
         end: datetime = datetime.now(),
         drop_index: bool = False        
     ):
-        asyncio.run(DatabaseSync.async_calls(coin_pairs, start, end, drop_index))
+        """
+        Starts concurrent download of Binance data to Postgres DB.
+
+        Parameters:
+            coin_pairs (list[tuple[str, str]]): List of (coin_pair, trade_type) tuples to download. Defaults to the list of all existing tuples in the database.
+
+            start (datetime): Date (inc.) to start download from. Defaults to yesterday.
+
+            end (datetime): Date (excl.) to end download from. Defaults to today.
+
+            drop_index (bool): Whether index should be dropped before download. Defaults to not dropping index.
+        """
+        asyncio.run(DatabaseSync._async_calls(coin_pairs, start, end, drop_index))
 
 if __name__ == '__main__':
     download_list = [
