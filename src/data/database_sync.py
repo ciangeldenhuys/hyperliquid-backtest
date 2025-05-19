@@ -4,7 +4,7 @@ import zipfile
 from psycopg import AsyncConnection, Connection, connect
 from psycopg_pool import AsyncConnectionPool
 import pandas as pd
-from typing import List, Optional, Tuple, Coroutine
+from typing import List, Optional, Tuple
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import asyncio
@@ -82,7 +82,7 @@ class DatabaseSync:
     # --- Existing Coins Utils --- #
 
     @staticmethod
-    def _get_coin_id(coin_pair: str) -> int:
+    def get_coin_id(coin_pair: str) -> int:
         """        
         Gets the coin_id for the given coin pairing from the database.
 
@@ -154,7 +154,7 @@ class DatabaseSync:
         conn = DatabaseSync._get_connection()
         cur = conn.cursor()
         try:
-            cur.execute('CREATE INDEX trades_index ON trades (coin_id, trade_time);')
+            cur.execute('CREATE INDEX trades_index ON trades (coin_id, trade_type, trade_time);')
             conn.commit()
         except Exception as e:
             print(f'Error recreating index: {e}')
@@ -224,7 +224,6 @@ class DatabaseSync:
             await conn.commit()
         except Exception as e:
             print(f"Error in bulk_insert: {e}")
-            print(f"final threads: {DatabaseSync.thread_count}, final copied: {DatabaseSync.copy_count}")
         finally:
             await DatabaseSync._release_async_connection(conn)
 
@@ -238,7 +237,8 @@ class DatabaseSync:
         """
         trade_type = url.split('/')[4]
         coin_pair = url.split('/')[-1].split('-')[0]
-        coin_id = DatabaseSync._get_coin_id(coin_pair)
+        date_str = '-'.join(url.split('/')[-1].split('-')[2:])[:-4]
+        coin_id = DatabaseSync.get_coin_id(coin_pair)
         
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
@@ -264,16 +264,17 @@ class DatabaseSync:
                             rows = chunk_df[['trade_id', 'trade_time', 'price', 'quantity', 'side', 'best_match']].values.tolist()
                             rows = [(r[0], coin_id, r[1], r[2], r[3], r[4], r[5], trade_type) for r in rows]
 
-                            tasks.append(asyncio.create_task(DatabaseSync.bulk_insert(rows)))
+                            tasks.append(asyncio.create_task(DatabaseSync._bulk_insert(rows)))
                             count += 1
 
-                            if count == 32:
+                            if count == 16:
                                 await asyncio.gather(*tasks)
+                                print(f'16 chunks of {coin_pair} inserted on {date_str}.')
                                 count = 0
                                 tasks = []
 
                         await asyncio.gather(*tasks)
-
+                        print(f'Finished inserting {coin_pair} on {date_str}.')
     @staticmethod
     async def _download_binance_to_db(coin_pairs: list[tuple[str, str]], start: datetime, end: datetime):
         """
@@ -373,4 +374,4 @@ if __name__ == '__main__':
         ('ADAUSDT', 'spot'),
         ('SUIUSDT', 'spot')
     ]
-    DatabaseSync.start_binance_download(download_list)
+    DatabaseSync.start_binance_download(download_list, datetime(2025, 1, 1), drop_index=True)

@@ -22,4 +22,4 @@ CREATE TABLE trades (
     CONSTRAINT coin_fk FOREIGN KEY (coin_id) REFERENCES coin_pair(coin_id)
 );
 
-CREATE INDEX trades_index ON trades (coin_id, trade_time);
+CREATE INDEX trades_index ON trades (coin_id, trade_type, trade_time);
