@@ -71,7 +71,7 @@ class VolumeSignal:
             if self.zb >= self.threshold:
                 if latest_buy >= latest_sell:
                     if latest_buy >= last_buy:
-                        print(f"BUY‑VOLUME, MOMENTUM SIGNAL | z = {self.zb}")
+                        print(f"BUY-VOLUME, MOMENTUM SIGNAL | z = {self.zb}")
                         self.actions["buy_momentum"]()
                     else:
                         print(f"BUY-VOLUME FALLING AFTER MOMENTUM SIGNAL | z = {self.zb}")

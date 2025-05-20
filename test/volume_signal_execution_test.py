@@ -43,9 +43,9 @@ class VolumeSignal:
         """
         if len(series) < 2:
             return 0.0
-        μ = mean(series[:-1])
-        σ = stdev(series[:-1])
-        return (series[-1] - μ) / σ if σ else 0.0
+        mu = mean(series[:-1])
+        sig = stdev(series[:-1])
+        return (series[-1] - mu) / sig if sig else 0.0
 
     async def monitor(self):
         """
@@ -72,7 +72,7 @@ class VolumeSignal:
             if self.zb >= self.threshold:
                 if latest_buy >= latest_sell:
                     if latest_buy >= last_buy:
-                        print(f"BUY‑VOLUME, MOMENTUM SIGNAL | z = {self.zb}")
+                        print(f"BUY-VOLUME, MOMENTUM SIGNAL | z = {self.zb}")
                         self.actions["buy_momentum"]()
                     else:
                         print(f"BUY-VOLUME FALLING AFTER MOMENTUM SIGNAL | z = {self.zb}")

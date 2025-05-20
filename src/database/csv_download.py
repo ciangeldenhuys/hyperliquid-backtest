@@ -1,5 +1,5 @@
 import datetime
-from datetime import timedelta
+from datetime import timedelta, datetime
 import requests
 import os
 from dotenv import load_dotenv

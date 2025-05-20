@@ -11,29 +11,27 @@ import asyncio
 import aiohttp
 from dotenv import load_dotenv
 
+load_dotenv()
+CONNECTION_STR = f"""
+    dbname={os.getenv('DB_NAME')}
+    user={os.getenv('DB_USER')}
+    password={os.getenv('DB_PASSWORD')}
+    host={os.getenv('DB_HOST')}
+    port={os.getenv('DB_PORT')}
+"""
+asyncio.set_event_loop_policy(
+    asyncio.WindowsSelectorEventLoopPolicy()
+)
+
 class DatabaseSync:
     """
     Sync data from Binance to the Postgres database. Provide DB credentials in .env file.
     Does not currently support data sync for futures or options.
     """
 
-    # --- Configure asyncio for psycopg3 --- #
+    # --- Async Connection Pool --- #
 
-    asyncio.set_event_loop_policy(
-        asyncio.WindowsSelectorEventLoopPolicy()
-    )
-
-    # --- Load Database Credentials --- #
-
-    load_dotenv()
-    connection_str = f"""
-        dbname={os.getenv('DB_NAME')}
-        user={os.getenv('DB_USER')}
-        password={os.getenv('DB_PASSWORD')}
-        host={os.getenv('DB_HOST')}
-        port={os.getenv('DB_PORT')}
-    """
-    pool = AsyncConnectionPool(connection_str, open=False)
+    pool = AsyncConnectionPool(CONNECTION_STR, open=False)
 
     # --- Database AsyncConnection Utils --- #
 
@@ -67,7 +65,7 @@ class DatabaseSync:
         Returns:
             conn (Connection): A synchronous connection to the database.
         """
-        return connect(DatabaseSync.connection_str)
+        return connect(CONNECTION_STR)
     
     @staticmethod
     def _release_connection(conn: Connection):
