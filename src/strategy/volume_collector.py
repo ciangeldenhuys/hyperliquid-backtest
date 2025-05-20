@@ -27,18 +27,20 @@ class VolumeCollector:
                 if slot["side"] == "B":
                     self.buy_usd += usd
 
-    async def flush(self):        
-        while True:
-            now = self.source.time().second
-            if (now == 30 or now == 0) and now != self.last_clear:
-                self.buy_volume_buffer.append(self.buy_usd)
-                self.sell_volume_buffer.append(self.sell_usd)
-                print("Time:", datetime.now())
-                print("Buffer size:", len(self.buy_volume_buffer))
-                print("Buy buffer:", list(self.buy_volume_buffer))
-                print("Sell buffer:", list(self.sell_volume_buffer))
-                self.buy_usd = 0.0
-                self.sell_usd = 0.0
-                self.last_clear = now
-                
-            await asyncio.sleep(0.1)
+    async def flush(self):
+        try:        
+            while True:
+                now = self.source.time()
+                if (now.second == 30 or now.second == 0) and now != self.last_clear:
+                    self.buy_volume_buffer.append(self.buy_usd)
+                    self.sell_volume_buffer.append(self.sell_usd)
+                    print("Time:", now)
+                    print("Buy buffer:", list(self.buy_volume_buffer))
+                    print("Sell buffer:", list(self.sell_volume_buffer))
+                    self.buy_usd = 0.0
+                    self.sell_usd = 0.0
+                    self.last_clear = now
+                    
+                await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            raise
