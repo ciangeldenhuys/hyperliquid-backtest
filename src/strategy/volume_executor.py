@@ -61,23 +61,36 @@ class VolumeExecutor:
 
         market_price = self.source.market_price()
 
-        buy_size = (USD_NOTIONAL * (self.zb / Z_SCORE_MAX)) / market_price
-        if buy_size * market_price > USD_NOTIONAL:
-            buy_size = USD_NOTIONAL / market_price
+        buy_size = (USD_NOTIONAL * min(self.zb / Z_SCORE_MAX, 1)) / market_price
 
-        self.source.create_buy_order(True, 0.01, buy_size)
+        self.source.create_buy_order(0.01, buy_size)
 
     def execute_buy_falling(self):
         print("Executing BUY FALLING trade...")
 
-        sell_size = (2) #fill in logic idk
+        buy_buf = self.collector.buy_volume_buffer
+        latest_buy = buy_buf[-1]
+        last_buy = buy_buf[-2]
+        ratio = latest_buy / last_buy
+        if ratio <= 0.5 :
+            ratio = 1
+        
+        sell_size = self.source.get_position_size * (ratio)
 
         self.source.create_sell_order(0.01, sell_size)
 
     def execute_sell_dominant(self):
         print("Executing SELL DOMINANT trade...")
 
-        sell_size = (2) #fill in logic idk
+        sell_buf = self.collector.sell_volume_buffer
+        buy_buf = self.collector.buy_volume_buffer
+        latest_buy = buy_buf[-1]
+        latest_sell = sell_buf[-1]
+        ratio = latest_buy/latest_sell
+        if ratio <= 0.5 :
+            ratio = 1
+        
+        sell_size = self.source.get_position_size * (ratio)
 
         self.source.create_sell_order(0.01, sell_size)
-    
+
