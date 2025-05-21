@@ -8,7 +8,7 @@ class Source(ABC):
         pass
 
     @abstractmethod
-    def stream_trades(self):
+    async def stream_trades(self):
         pass
     
     @abstractmethod
@@ -30,3 +30,12 @@ class Source(ABC):
     @abstractmethod
     def wallet_assets(self):
         pass
+
+    @abstractmethod
+    def get_position_size(self):
+        pass
+
+    @abstractmethod
+    def get_wallet_balance(self):
+        pass
+

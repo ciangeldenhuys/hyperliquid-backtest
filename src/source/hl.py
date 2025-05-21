@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from hyperliquid.info import Info
 from hyperliquid.exchange import Exchange
 from hyperliquid.utils.constants import MAINNET_API_URL
+import json 
 
 load_dotenv()
 ADDRESS = os.getenv('METAMASK_ADDRESS')
@@ -16,7 +17,6 @@ class Hyperliquid(Source):
     def __init__(self, coin: str):
         self.coin = coin
         self._trade_handlers = []
-        exchange.update_leverage(1, self.coin)
 
     def time(self):
         return datetime.now()
@@ -59,3 +59,19 @@ class Hyperliquid(Source):
     def wallet_assets(self):
         user_state = info.user_state(ADDRESS)
         return user_state['assetPositions']
+
+    def get_position_size(self):
+        all_positions = self.wallet_assets()
+        position_size = 0.0
+
+        for p in all_positions:
+            pos = p.get("position")
+            if pos.get("coin") == self.coin:
+                position_size += float(pos.get("szi"))
+
+        return position_size
+
+    def get_wallet_balance(self):
+        user_data = info.user_state(ADDRESS)
+        withdrawable = user_data["response"]["data"].get("withdrawable")
+        return float(withdrawable)
