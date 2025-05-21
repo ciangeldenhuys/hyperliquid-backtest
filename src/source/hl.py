@@ -16,6 +16,7 @@ class Hyperliquid(Source):
     def __init__(self, coin: str):
         self.coin = coin
         self._trade_handlers = []
+        exchange.update_leverage(1, self.coin)
 
     def time(self):
         return datetime.now()

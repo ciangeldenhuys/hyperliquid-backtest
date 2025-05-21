@@ -8,7 +8,7 @@ class Source(ABC):
         pass
 
     @abstractmethod
-    async def stream_trades(self):
+    def stream_trades(self):
         pass
     
     @abstractmethod
