@@ -1,6 +1,6 @@
 from source import Source
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from hyperliquid.info import Info
 from hyperliquid.exchange import Exchange
@@ -19,7 +19,7 @@ class Hyperliquid(Source):
         self._trade_handlers = []
 
     def time(self):
-        return datetime.now()
+        return datetime.now(tz=timezone.utc)
 
     def add_trade_handler(self, handler):
         self._trade_handlers.append(handler)
@@ -28,7 +28,12 @@ class Hyperliquid(Source):
         for handler in self._trade_handlers:
             handler(trades)
 
+    @property
+    def streaming(self):
+        return self._streaming
+
     def stream_trades(self):
+        self._streaming = True
         info.subscribe({'type': 'trades', 'coin': self.coin}, self._handle_trade)
 
     def create_buy_order(self, buy_size, allowed_slip):

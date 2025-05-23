@@ -1,17 +1,24 @@
 import source
-from volume_collector import VolumeCollector
+from .volume_collector import VolumeCollector
 from statistics import mean, stdev
 import asyncio
 import yaml
+from datetime import datetime
 
-with open('config\\volume.yaml', 'r') as f:
-    config = yaml.safe_load(f)
+# with open('config\\volume.yaml', 'r') as f:
+#     config = yaml.safe_load(f)
 
-THRESHOLD = config['threshold']
-MIN_POINTS = config['min_points']
-POLL_INTERVAL = config['poll_interval']
-Z_SCORE_MAX = config['z_score_max']
-USD_NOTIONAL = config['usd_notional']
+# THRESHOLD = config['threshold']
+# MIN_POINTS = config['min_points']
+# POLL_INTERVAL = config['poll_interval']
+# Z_SCORE_MAX = config['z_score_max']
+# USD_NOTIONAL = config['usd_notional']
+
+THRESHOLD = 2.5
+MIN_POINTS = 30
+POLL_INTERVAL = 0.01
+Z_SCORE_MAX = 20
+USD_NOTIONAL = 1000
 
 class VolumeExecutor:
     def __init__(self, source: source.Source):
@@ -19,6 +26,17 @@ class VolumeExecutor:
         self.zs = 0
         self.source = source
         self.collector = VolumeCollector(source)
+
+    async def start(self):
+        try:
+            self.source.stream_trades()
+            await asyncio.gather(self.monitor(), self.collector.flush())
+        except Exception as e:
+            print(e)
+            tasks = asyncio.all_tasks()
+            for task in tasks:
+                if task is not asyncio.current_task():
+                    task.cancel()
 
     def _z_score(self, series):
         if len(series) < 2:
@@ -28,9 +46,12 @@ class VolumeExecutor:
         return (series[-1] - mu) / sig if sig else 0.0
     
     async def monitor(self):
+        print('monitoring')
         while True:
+            print('mon')
             await asyncio.sleep(POLL_INTERVAL)
-
+            print('going')
+            
             buy_buf = self.collector.buy_volume_buffer
             sell_buf = self.collector.sell_volume_buffer
 

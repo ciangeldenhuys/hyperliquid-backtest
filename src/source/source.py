@@ -3,6 +3,11 @@ from datetime import datetime
 
 class Source(ABC):
 
+    @property
+    @abstractmethod
+    def streaming(self) -> bool:
+        pass
+
     @abstractmethod
     def time(self) -> datetime:
         pass
