@@ -1,0 +1,5 @@
+threshold: 2.5
+min_points: 30
+poll_interval: 0.5
+z_score_max: 5
+usd_notional: 1000
