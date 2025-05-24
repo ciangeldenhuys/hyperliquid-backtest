@@ -21,7 +21,11 @@ asyncio.set_event_loop_policy(
 
 THRESHOLD = 2.5
 MIN_POINTS = 0
+<<<<<<< HEAD
+POLL_INTERVAL = 0.2
+=======
 POLL_INTERVAL = 0.01
+>>>>>>> a261d4945b04232b8f1a9781b00d3f88d61beb29
 Z_SCORE_MAX = 20
 USD_NOTIONAL = 1000
 
@@ -52,10 +56,23 @@ class VolumeExecutor:
             sell_buf = self.collector.sell_volume_buffer
 
             if len(buy_buf) < 2 or len(sell_buf) < 1:
+<<<<<<< HEAD
+                await asyncio.sleep(POLL_INTERVAL)
+=======
                 continue
 
             if buy_buf[-1] is None or buy_buf[-2] is None or sell_buf[-1] is None:
+>>>>>>> a261d4945b04232b8f1a9781b00d3f88d61beb29
                 continue
+
+            # Check for None values
+            if buy_buf[-1] is None or buy_buf[-2] is None or sell_buf[-1] is None:
+                await asyncio.sleep(POLL_INTERVAL)
+                continue
+
+            latest_buy = buy_buf[-1]
+            latest_sell = sell_buf[-1]
+            last_buy = buy_buf[-2]
 
             latest_buy = buy_buf[-1]
             latest_sell = sell_buf[-1]
