@@ -48,13 +48,16 @@ class Backtest(Source):
         while rows := await self._get_rows(step):
             step += 1
             for row in rows:
-                print(row)
                 price, quantity, side, trade_time = row
 
-                if self._time.minute != trade_time.minute:
-                    print(self._time)
+                await asyncio.sleep(0.5)
+
+                if self._time is not None and self._time.hour != trade_time.hour:
+                    print(f'time: {self._time}')
 
                 self._time = trade_time
+
+                print(self.time())
 
                 if side:
                     self._last_buy = price
@@ -77,14 +80,11 @@ class Backtest(Source):
 
                 for handler in self._trade_handlers:
                     handler(trades)
-        print('left')
 
     async def _get_rows(self, step) -> list[tuple[float, float, bool, datetime]]:
         async with await psycopg.AsyncConnection.connect(CONNECTION_STR) as conn:
-            print('got conn')
             async with conn.cursor() as cur:
                 coin_id = db.get_coin_id(self.coin)
-                print(coin_id, self.end, READ_SIZE * step, READ_SIZE)
                 await cur.execute("""
                     SELECT price, quantity, side, trade_time
                     FROM trades
@@ -95,8 +95,6 @@ class Backtest(Source):
                     FETCH NEXT %s ROWS ONLY;
                     """, (coin_id, self.end, READ_SIZE * step, READ_SIZE)
                 )
-
-                print(await cur.fetchone())
 
                 return await cur.fetchall()
             
