@@ -1,27 +1,22 @@
 from source import Source
 import psycopg
+from psycopg.connection import Connection
 from datetime import datetime
 import statistics
-import asyncio
 from database import DatabaseSync as db
 from database import CONNECTION_STR
-
-READ_SIZE = 100000
-
-asyncio.set_event_loop_policy(
-    asyncio.WindowsSelectorEventLoopPolicy()
-)
 
 class Backtest(Source):
     def __init__(self, coin: str, start: datetime, end: datetime, withdrawable: float):
         self.coin = coin
-        self.start = start
         self.end = end
-        self._time = None
+        self._time = start
+        self._last_id = -1
+
         self._market_price = None
         self._last_sell = None
         self._last_buy = None
-        self._streaming = False
+
         self._trade_handlers = []
         self._wallet = {
             'assetPositions': [
@@ -35,34 +30,12 @@ class Backtest(Source):
             'withdrawable': withdrawable
         }
 
-    @property
-    def streaming(self):
-        return self._streaming
-
     def stream_trades(self):
-        self._streaming = True
-        asyncio.create_task(self._stream_trades())
-
-    async def _stream_trades(self):
-        step = 0
-        while rows := await self._get_rows(step):
-            step += 1
-            for row in rows:
-                price, quantity, side, trade_time = row
-
-<<<<<<< HEAD
-                if self._time is not None and self._time.minute != trade_time.minute:
-                    print(self._time)
-=======
-                await asyncio.sleep(0.5)
-
-                if self._time is not None and self._time.hour != trade_time.hour:
-                    print(f'time: {self._time}')
->>>>>>> a261d4945b04232b8f1a9781b00d3f88d61beb29
-
+        with psycopg.Connection.connect(CONNECTION_STR) as conn:
+            while row := self._get_row(conn):
+                price, quantity, side, trade_time, trade_id = row
                 self._time = trade_time
-
-                print(self.time())
+                self._last_id = trade_id
 
                 if side:
                     self._last_buy = price
@@ -86,22 +59,20 @@ class Backtest(Source):
                 for handler in self._trade_handlers:
                     handler(trades)
 
-    async def _get_rows(self, step) -> list[tuple[float, float, bool, datetime]]:
-        async with await psycopg.AsyncConnection.connect(CONNECTION_STR) as conn:
-            async with conn.cursor() as cur:
-                coin_id = db.get_coin_id(self.coin)
-                await cur.execute("""
-                    SELECT price, quantity, side, trade_time
-                    FROM trades
-                    WHERE coin_id = %s
-                    AND trade_time < %s
-                    ORDER BY trade_time
-                    OFFSET %s ROWS
-                    FETCH NEXT %s ROWS ONLY;
-                    """, (coin_id, self.end, READ_SIZE * step, READ_SIZE)
-                )
-
-                return await cur.fetchall()
+    def _get_row(self, conn: Connection) -> tuple[float, float, bool, datetime]:
+        with conn.cursor() as cur:
+            coin_id = db.get_coin_id(self.coin)
+            cur.execute("""
+                SELECT price, quantity, side, trade_time, trade_id
+                FROM trades
+                WHERE coin_id = %s
+                AND (trade_time, trade_id) > (%s, %s)
+                AND trade_time < %s
+                ORDER BY trade_time, trade_id
+                LIMIT 1;
+                """, (coin_id, self._time, self._last_id, self.end)
+            )
+            return cur.fetchone()
             
     def add_trade_handler(self, handler):
         self._trade_handlers.append(handler)
