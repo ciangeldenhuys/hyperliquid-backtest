@@ -51,7 +51,7 @@ class Backtest(Source):
                 print(row)
                 price, quantity, side, trade_time = row
 
-                if self._time.minute != trade_time.minute:
+                if self._time is not None and self._time.minute != trade_time.minute:
                     print(self._time)
 
                 self._time = trade_time

@@ -15,8 +15,8 @@ from datetime import datetime
 # USD_NOTIONAL = config['usd_notional']
 
 THRESHOLD = 2.5
-MIN_POINTS = 30
-POLL_INTERVAL = 0.01
+MIN_POINTS = 0
+POLL_INTERVAL = 0.2
 Z_SCORE_MAX = 20
 USD_NOTIONAL = 1000
 
@@ -55,8 +55,18 @@ class VolumeExecutor:
             buy_buf = self.collector.buy_volume_buffer
             sell_buf = self.collector.sell_volume_buffer
 
-            if len(buy_buf) < MIN_POINTS or len(sell_buf) < MIN_POINTS:
+            if len(buy_buf) < 2 or len(sell_buf) < 1:
+                await asyncio.sleep(POLL_INTERVAL)
                 continue
+
+            # Check for None values
+            if buy_buf[-1] is None or buy_buf[-2] is None or sell_buf[-1] is None:
+                await asyncio.sleep(POLL_INTERVAL)
+                continue
+
+            latest_buy = buy_buf[-1]
+            latest_sell = sell_buf[-1]
+            last_buy = buy_buf[-2]
 
             latest_buy = buy_buf[-1]
             latest_sell = sell_buf[-1]
