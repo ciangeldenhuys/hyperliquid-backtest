@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from hyperliquid.info import Info
 from hyperliquid.exchange import Exchange
 from hyperliquid.utils.constants import MAINNET_API_URL
-import json 
 
 load_dotenv()
 ADDRESS = os.getenv('METAMASK_ADDRESS')
@@ -27,10 +26,6 @@ class Hyperliquid(Source):
     def _handle_trade(self, trades):
         for handler in self._trade_handlers:
             handler(trades)
-
-    @property
-    def streaming(self):
-        return self._streaming
 
     def stream_trades(self):
         self._streaming = True
