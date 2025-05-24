@@ -1,6 +1,12 @@
 import source
 import asyncio
 from collections import deque
+from datetime import datetime
+import time
+
+asyncio.set_event_loop_policy(
+    asyncio.WindowsSelectorEventLoopPolicy()
+)
 
 class VolumeCollector:
     def __init__(self, source: source.Source):
@@ -21,13 +27,10 @@ class VolumeCollector:
         
                 if slot["side"] == "A":
                     self.sell_usd += usd
-                    print(self.sell_usd)
                 if slot["side"] == "B":
                     self.buy_usd += usd
-                    print(self.buy_usd)
 
-    async def flush(self):
-        print('flush')  
+    def flush(self):
         while True:
             now = self.source.time()
             if now is None:
@@ -41,5 +44,3 @@ class VolumeCollector:
                 self.buy_usd = 0.0
                 self.sell_usd = 0.0
                 self.last_clear = now
-
-            await asyncio.sleep(0.01)
