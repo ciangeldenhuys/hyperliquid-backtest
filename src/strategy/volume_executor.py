@@ -4,6 +4,11 @@ from statistics import mean, stdev
 import asyncio
 import yaml
 from datetime import datetime
+import time
+
+asyncio.set_event_loop_policy(
+    asyncio.WindowsSelectorEventLoopPolicy()
+)
 
 # with open('config\\volume.yaml', 'r') as f:
 #     config = yaml.safe_load(f)
@@ -16,7 +21,11 @@ from datetime import datetime
 
 THRESHOLD = 2.5
 MIN_POINTS = 0
+<<<<<<< HEAD
 POLL_INTERVAL = 0.2
+=======
+POLL_INTERVAL = 0.01
+>>>>>>> a261d4945b04232b8f1a9781b00d3f88d61beb29
 Z_SCORE_MAX = 20
 USD_NOTIONAL = 1000
 
@@ -28,15 +37,11 @@ class VolumeExecutor:
         self.collector = VolumeCollector(source)
 
     async def start(self):
-        try:
-            self.source.stream_trades()
-            await asyncio.gather(self.monitor(), self.collector.flush())
-        except Exception as e:
-            print(e)
-            tasks = asyncio.all_tasks()
-            for task in tasks:
-                if task is not asyncio.current_task():
-                    task.cancel()
+        self.source.stream_trades()
+        await asyncio.gather(
+            asyncio.to_thread(self.monitor),
+            asyncio.to_thread(self.collector.flush)
+        )
 
     def _z_score(self, series):
         if len(series) < 2:
@@ -45,18 +50,19 @@ class VolumeExecutor:
         sig = stdev(series[:-1])
         return (series[-1] - mu) / sig if sig else 0.0
     
-    async def monitor(self):
-        print('monitoring')
+    def monitor(self):
         while True:
-            print('mon')
-            await asyncio.sleep(POLL_INTERVAL)
-            print('going')
-            
             buy_buf = self.collector.buy_volume_buffer
             sell_buf = self.collector.sell_volume_buffer
 
             if len(buy_buf) < 2 or len(sell_buf) < 1:
+<<<<<<< HEAD
                 await asyncio.sleep(POLL_INTERVAL)
+=======
+                continue
+
+            if buy_buf[-1] is None or buy_buf[-2] is None or sell_buf[-1] is None:
+>>>>>>> a261d4945b04232b8f1a9781b00d3f88d61beb29
                 continue
 
             # Check for None values

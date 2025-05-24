@@ -41,10 +41,8 @@ class VolumeCollectorExecutor:
 
                 if slot["side"] == "A":
                     self.sell_usd += usd
-                    print(self.sell_usd)
                 if slot["side"] == "B":
                     self.buy_usd += usd
-                    print(self.buy_usd)
 
     def flush(self, trade_time):
 
