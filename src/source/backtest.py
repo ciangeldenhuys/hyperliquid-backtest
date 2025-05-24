@@ -1,10 +1,10 @@
 from source import Source
+from database import DatabaseSync as db
+from database import CONNECTION_STR
+import statistics
 import psycopg
 from psycopg.connection import Connection
 from datetime import datetime
-import statistics
-from database import DatabaseSync as db
-from database import CONNECTION_STR
 
 class Backtest(Source):
     def __init__(self, coin: str, start: datetime, end: datetime, withdrawable: float):
@@ -91,20 +91,17 @@ class Backtest(Source):
         self._wallet['assetPositions'][0]['position']['szi'] = max(0, self._wallet['assetPositions'][0]['position']['szi'] - sell_size)
         self._wallet['withdrawable'] += sell_size * self._last_sell
     
-    def wallet_assets(self):
-        return self._wallet
-    
-    def get_position_size(self):
-        all_positions = self.wallet_assets()
+    def position_size(self):
+        all_positions = self._wallet
         position_size = 0.0
 
         for p in all_positions:
-            pos = p.get("position")
-            if pos.get("coin") == self.coin:
-                position_size += float(pos.get("szi"))
+            pos = p.get('position')
+            if pos.get('coin') == self.coin:
+                position_size += float(pos.get('szi'))
 
         return position_size
     
-    def get_wallet_balance(self):
+    def withdrawable(self):
         return self._wallet['withdrawable']
     

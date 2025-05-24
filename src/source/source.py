@@ -28,14 +28,10 @@ class Source(ABC):
         pass
 
     @abstractmethod
-    def wallet_assets(self):
+    def position_size(self):
         pass
 
     @abstractmethod
-    def get_position_size(self):
-        pass
-
-    @abstractmethod
-    def get_wallet_balance(self):
+    def withdrawable(self):
         pass
 
