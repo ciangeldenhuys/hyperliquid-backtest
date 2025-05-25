@@ -34,6 +34,7 @@ class Source(ABC):
     @abstractmethod
     def withdrawable(self):
         pass
+    
     @abstractmethod
     def last_sell_price(self):
         pass
@@ -41,3 +42,7 @@ class Source(ABC):
     @abstractmethod
     def last_buy_price(self):
         pass   
+
+    @abstractmethod
+    def current_total_usd(self):
+        pass

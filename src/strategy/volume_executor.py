@@ -22,6 +22,8 @@ class VolumeExecutor:
         self._source.add_trade_handler(self._trade_handler)
         self._tradetime_marker = None
 
+        self._available = USD_NOTIONAL
+
         self.flush_count = 0
 
         self.zb = 0
@@ -64,17 +66,17 @@ class VolumeExecutor:
                 if latest_buy >= latest_sell:
                     if latest_buy >= last_buy:
                         print(f'BUY-VOLUME, MOMENTUM SIGNAL | z = {self.zb}')
-                        print('Balance: ', self._source.withdrawable())
+                        print('Balance: ', self._source.current_total_usd())
 
                         self._execute_buy_momentum()
                     else:
                         print(f'BUY-VOLUME FALLING AFTER MOMENTUM SIGNAL | z = {self.zb}')
-                        print('Balance: ', self._source.withdrawable())
+                        print('Balance: ', self._source.current_total_usd())
 
                         self._execute_buy_falling()
                 else:
                     print(f'SELL DOMINANT DESPITE BUY SIGNAL | z = {self.zb}')
-                    print('Balance: ', self._source.withdrawable())
+                    print('Balance: ', self._source.current_total_usd())
 
                     self._execute_sell_dominant()
 
@@ -102,10 +104,8 @@ class VolumeExecutor:
         print('Executing BUY MOMENTUM trade...')
 
         market_buy_price = float(self._source.last_buy_price())
-        if (USD_NOTIONAL - self._source.position_size() * float(market_buy_price)) < 0:
-            buy_size = 0
-        else:
-            buy_size = (USD_NOTIONAL * min(self.zb / Z_SCORE_MAX, 1)) / market_buy_price
+        buy_size = (self._available * min(self.zb / Z_SCORE_MAX, 1)) / market_buy_price
+        self._available = self._available - min(self.zb / Z_SCORE_MAX, 1) * self._available
 
         print('buy size: ', buy_size)
         self._source.create_buy_order(buy_size)
@@ -120,7 +120,9 @@ class VolumeExecutor:
         if ratio <= 0.5 :
             ratio = 1
         
+        market_sell_price = float(self._source.last_sell_price())
         sell_size = self._source.position_size() * (ratio)
+        self._available = self._available + sell_size * market_sell_price
         print('sell size: ', sell_size)
 
         self._source.create_sell_order(sell_size)
@@ -136,7 +138,9 @@ class VolumeExecutor:
         if ratio <= 0.5 :
             ratio = 1
         
+        market_sell_price = float(self._source.last_sell_price())
         sell_size = self._source.position_size() * (ratio)
+        self._available = self._available + sell_size * market_sell_price
         print('sell size: ', sell_size)
 
         self._source.create_sell_order(sell_size)

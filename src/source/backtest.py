@@ -119,4 +119,4 @@ class Backtest(Source):
         return self._wallet['withdrawable']
     
     def current_total_usd(self):
-        return self._wallet['withdrawable'] + self.position_size() * self.last_sell_price()
+        return self._wallet['withdrawable'] + float(self.position_size()) * float(self.last_sell_price())

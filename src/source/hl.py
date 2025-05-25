@@ -74,3 +74,6 @@ class Hyperliquid(Source):
         user_data = self._info.user_state(ADDRESS)
         withdrawable = user_data['response']['data'].get('withdrawable')
         return float(withdrawable)
+    
+    def current_total_usd(self):
+        pass
