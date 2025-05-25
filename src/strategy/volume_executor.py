@@ -25,7 +25,7 @@ class VolumeExecutor:
         self.zb = 0
         self.zs = 0
 
-        # self._source.stream_trades()
+        self._source.stream_trades()
 
     def _trade_handler(self, trades):
         for slot in trades['data']:

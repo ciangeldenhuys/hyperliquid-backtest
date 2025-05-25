@@ -6,6 +6,8 @@ import psycopg
 from psycopg.connection import Connection
 from datetime import datetime
 
+READ_SIZE = 100000
+
 class Backtest(Source):
     def __init__(self, coin: str, start: datetime, end: datetime, withdrawable: float):
         self.coin = coin
@@ -32,34 +34,35 @@ class Backtest(Source):
 
     def stream_trades(self):
         with psycopg.Connection.connect(CONNECTION_STR) as conn:
-            while row := self._get_row(conn):
-                price, quantity, side, trade_time, trade_id = row
-                self._time = trade_time
-                self._last_id = trade_id
+            while rows := self._get_rows(conn):
+                for row in rows:
+                    price, quantity, side, trade_time, trade_id = row
+                    self._time = trade_time
+                    self._last_id = trade_id
 
-                if side:
-                    self._last_buy = price
-                else:
-                    self._last_sell = price
+                    if side:
+                        self._last_buy = price
+                    else:
+                        self._last_sell = price
 
-                if self._last_buy and self._last_sell:
-                    self._market_price = statistics.mean([self._last_buy, self._last_sell])
+                    if self._last_buy and self._last_sell:
+                        self._market_price = statistics.mean([self._last_buy, self._last_sell])
 
-                trades = {
-                    'data': [
-                        {
-                            'time': trade_time.timestamp() * 1000,
-                            'px': price,
-                            'side': 'B' if side else 'A',
-                            'sz': quantity
-                        }
-                    ]
-                }
+                    trades = {
+                        'data': [
+                            {
+                                'time': trade_time.timestamp() * 1000,
+                                'px': price,
+                                'side': 'B' if side else 'A',
+                                'sz': quantity
+                            }
+                        ]
+                    }
 
-                for handler in self._trade_handlers:
-                    handler(trades)
+                    for handler in self._trade_handlers:
+                        handler(trades)
 
-    def _get_row(self, conn: Connection) -> tuple[float, float, bool, datetime]:
+    def _get_rows(self, conn: Connection) -> list[tuple[float, float, bool, datetime]]:
         with conn.cursor() as cur:
             coin_id = db.get_coin_id(self.coin)
             cur.execute("""
@@ -68,11 +71,12 @@ class Backtest(Source):
                 WHERE coin_id = %s
                 AND (trade_time, trade_id) > (%s, %s)
                 AND trade_time < %s
+                AND trade_type = 'spot'
                 ORDER BY trade_time, trade_id
-                LIMIT 1;
-                """, (coin_id, self._time, self._last_id, self.end)
+                LIMIT %s;
+                """, (coin_id, self._time, self._last_id, self.end, READ_SIZE)
             )
-            return cur.fetchone()
+            return cur.fetchall()
             
     def add_trade_handler(self, handler):
         self._trade_handlers.append(handler)
