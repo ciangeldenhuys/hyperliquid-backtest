@@ -87,16 +87,19 @@ class Backtest(Source):
     def market_price(self):
         return self._market_price
     
-    def create_buy_order(self, buy_size, allowed_slip):
+    def create_buy_order(self, buy_size):
         self._wallet['assetPositions'][0]['position']['szi'] += buy_size
-        self._wallet['withdrawable'] -= buy_size * self._last_buy
+        self._wallet['withdrawable'] -= buy_size * float(self._last_buy)
+        # print('hi: ', float(self._last_buy))
+        # print('h', buy_size)
+        # print('hi2', buy_size * float(self._last_buy))
     
-    def create_sell_order(self, sell_size, allowed_slip):
+    def create_sell_order(self, sell_size):
         self._wallet['assetPositions'][0]['position']['szi'] = max(0, self._wallet['assetPositions'][0]['position']['szi'] - sell_size)
-        self._wallet['withdrawable'] += sell_size * self._last_sell
+        self._wallet['withdrawable'] += sell_size * float(self._last_sell)
     
     def position_size(self):
-        all_positions = self._wallet
+        all_positions = self._wallet['assetPositions']
         position_size = 0.0
 
         for p in all_positions:

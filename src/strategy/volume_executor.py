@@ -22,6 +22,8 @@ class VolumeExecutor:
         self._source.add_trade_handler(self._trade_handler)
         self._tradetime_marker = None
 
+        self.flush_count = 0
+
         self.zb = 0
         self.zs = 0
 
@@ -47,7 +49,6 @@ class VolumeExecutor:
                     self._buy_usd += usd
 
     def _flush(self, trade_time):
-
         buy_buf = self._buy_volume_buffer
         sell_buf = self._sell_volume_buffer
 
@@ -63,26 +64,35 @@ class VolumeExecutor:
                 if latest_buy >= latest_sell:
                     if latest_buy >= last_buy:
                         print(f'BUY-VOLUME, MOMENTUM SIGNAL | z = {self.zb}')
+                        print('Balance: ', self._source.withdrawable())
+
                         self._execute_buy_momentum()
                     else:
                         print(f'BUY-VOLUME FALLING AFTER MOMENTUM SIGNAL | z = {self.zb}')
+                        print('Balance: ', self._source.withdrawable())
+
                         self._execute_buy_falling()
                 else:
                     print(f'SELL DOMINANT DESPITE BUY SIGNAL | z = {self.zb}')
+                    print('Balance: ', self._source.withdrawable())
+
                     self._execute_sell_dominant()
 
         self._buy_volume_buffer.append(self._buy_usd)
         self._sell_volume_buffer.append(self._sell_usd)
-        print('Flushed at: ', trade_time)
-        print('Buy buffer:', list(self._buy_volume_buffer))
-        print('Sell buffer:', list(self._sell_volume_buffer))
+        #print('Flushed at: ', trade_time)
+        #print('Flush Count: ', self.flush_count)
+        #print('Buy buffer:', list(self._buy_volume_buffer)[-5:])
+        #print('Sell buffer:', list(self._sell_volume_buffer)[-5:])
+        #print('Balance: ', self._source.withdrawable())
+        self.flush_count += 1
         self._buy_usd = 0.0
         self._sell_usd = 0.0
         self._tradetime_marker = trade_time
 
 
     def _z_score(self, series):
-        if len(series) < 2:
+        if len(series) < 3:
             return 0.0
         mu = mean(series[:-1])
         sig = stdev(series[:-1])
@@ -91,11 +101,11 @@ class VolumeExecutor:
     def _execute_buy_momentum(self):
         print('Executing BUY MOMENTUM trade...')
 
-        market_price = self._source.market_price()
+        market_price = float(self._source.market_price())
 
         buy_size = (USD_NOTIONAL * min(self.zb / Z_SCORE_MAX, 1)) / market_price
-
-        self._source.create_buy_order(0.01, buy_size)
+        print('buy size: ', buy_size)
+        self._source.create_buy_order(buy_size)
 
     def _execute_buy_falling(self):
         print('Executing BUY FALLING trade...')
@@ -108,8 +118,9 @@ class VolumeExecutor:
             ratio = 1
         
         sell_size = self._source.position_size() * (ratio)
+        print('sell size: ', sell_size)
 
-        self._source.create_sell_order(0.01, sell_size)
+        self._source.create_sell_order(sell_size)
 
     def _execute_sell_dominant(self):
         print('Executing SELL DOMINANT trade...')
@@ -123,5 +134,6 @@ class VolumeExecutor:
             ratio = 1
         
         sell_size = self._source.position_size() * (ratio)
+        print('sell size: ', sell_size)
 
-        self._source.create_sell_order(0.01, sell_size)
+        self._source.create_sell_order(sell_size)
