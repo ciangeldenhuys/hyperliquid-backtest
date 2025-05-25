@@ -101,9 +101,12 @@ class VolumeExecutor:
     def _execute_buy_momentum(self):
         print('Executing BUY MOMENTUM trade...')
 
-        market_price = float(self._source.market_price())
+        market_buy_price = float(self._source.last_buy_price())
+        if (USD_NOTIONAL - self._source.position_size() * float(market_buy_price)) < 0:
+            buy_size = 0
+        else:
+            buy_size = (USD_NOTIONAL * min(self.zb / Z_SCORE_MAX, 1)) / market_buy_price
 
-        buy_size = (USD_NOTIONAL * min(self.zb / Z_SCORE_MAX, 1)) / market_price
         print('buy size: ', buy_size)
         self._source.create_buy_order(buy_size)
 

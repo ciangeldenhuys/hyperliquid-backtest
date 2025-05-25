@@ -61,6 +61,12 @@ class Backtest(Source):
 
                     for handler in self._trade_handlers:
                         handler(trades)
+    
+    def last_sell_price(self):
+        return self._last_sell
+    
+    def last_buy_price(self):
+        return self._last_buy
 
     def _get_rows(self, conn: Connection) -> list[tuple[float, float, bool, datetime]]:
         with conn.cursor() as cur:
@@ -112,3 +118,5 @@ class Backtest(Source):
     def withdrawable(self):
         return self._wallet['withdrawable']
     
+    def current_total_usd(self):
+        return self._wallet['withdrawable'] + self.position_size() * self.last_sell_price()
