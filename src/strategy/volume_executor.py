@@ -21,6 +21,12 @@ class VolumeExecutor:
         self._source = source
         self._source.add_trade_handler(self._trade_handler)
         self._tradetime_marker = None
+        self._last_time = None
+        self._first_price = None
+
+        self.balance_values = []
+        self.price_values = []
+        self.times = []
 
         self._available = USD_NOTIONAL
 
@@ -29,6 +35,7 @@ class VolumeExecutor:
         self.zb = 0
         self.zs = 0
 
+    def start(self):
         self._source.stream_trades()
 
     def _trade_handler(self, trades):
@@ -40,10 +47,21 @@ class VolumeExecutor:
                 usd = price * size
 
                 if self._tradetime_marker is None:
-                    self._tradetime_marker = trade_time 
-                
+                    self._tradetime_marker = trade_time
+
                 if trade_time >= self._tradetime_marker + 30:
                     self._flush(trade_time)
+
+                if self._last_time is None:
+                    self._last_time = self._source.time()
+
+                if self._first_price is None:
+                    self._first_price = self._source.market_price()
+
+                if self._source.time().hour > self._last_time.hour:
+                    self.price_values.append((self._source.market_price() / self._first_price - 1) * 100)
+                    self.balance_values.append((self._source.current_total_usd() / USD_NOTIONAL - 1) * 100)
+                    self.times.append(self._source.time())
 
                 if slot['side'] == 'A':
                     self._sell_usd += usd
