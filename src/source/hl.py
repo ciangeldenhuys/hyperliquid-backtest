@@ -27,7 +27,6 @@ class Hyperliquid(Source):
             handler(trades)
 
     def stream_trades(self):
-        self._streaming = True
         self._info.subscribe({'type': 'trades', 'coin': self._coin}, self._handle_trade)
 
     def create_buy_order(self, buy_size, allowed_slip):

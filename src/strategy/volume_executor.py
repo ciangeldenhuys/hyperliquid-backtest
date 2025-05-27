@@ -1,46 +1,44 @@
 import source
-from collections import deque
-from statistics import mean, stdev
-import os
-import yaml
-
-with open(os.path.join(os.path.dirname(__file__), 'config', 'volume.yaml'), 'r') as f:
-    config = yaml.safe_load(f)
-
-MIN_POINTS = config['MIN_POINTS']
-THRESHOLD = config['THRESHOLD']
-Z_SCORE_MAX = config['Z_SCORE_MAX']
-USD_NOTIONAL = config['USD_NOTIONAL']
+from strategy.utils.deque_avg_var import DequeAvgVar
+import strategy.config.volume_config as config
 
 class VolumeExecutor:
-    def __init__(self, source: source.Source):
-        self._buy_volume_buffer = deque(maxlen=2880)
-        self._sell_volume_buffer = deque(maxlen=2880)
+    def __init__(self, source: source.Source, usd_notional: float, graph: bool = True):
+        short_buf = config.SHORT_BUF // config.FLUSH
+        self._buy_short_buf = DequeAvgVar(maxlen=short_buf)
+        self._sell_short_buf = DequeAvgVar(maxlen=short_buf)
+
+        long_buf = config.LONG_BUF // config.FLUSH
+        self._buy_long_buf = DequeAvgVar(maxlen=long_buf)
+        self._sell_long_buf = DequeAvgVar(maxlen=long_buf)
+
+        self._full_flag = False
         self._buy_usd = 0.0
         self._sell_usd = 0.0
         self._source = source
         self._source.add_trade_handler(self._trade_handler)
         self._tradetime_marker = None
-        self._last_time = None
-        self._first_price = None
+        self._available = usd_notional
+        self.usd_notional = usd_notional
 
-        self.balance_values = []
-        self.price_values = []
-        self.times = []
+        self._zb = 0
+        self._zs = 0
 
-        self._available = USD_NOTIONAL
-
-        self.flush_count = 0
-
-        self.zb = 0
-        self.zs = 0
+        self.graph = graph
+        if self.graph:
+            self.graph_marker = None
+            self._first_price = None
+            self.balance_values = []
+            self.price_values = []
+            self.times = []
 
     def start(self):
+        print('Streaming trades')
         self._source.stream_trades()
 
     def _trade_handler(self, trades):
         for slot in trades['data']:
-            if abs(int(self._source.time().timestamp() * 1000 - slot['time'])) <= 10000:
+            if abs(int(self._source.time().timestamp() * 1000 - slot['time'])) < 10000:
                 trade_time = self._source.time().timestamp()
                 price = float(slot['px'])
                 size  = float(slot['sz'])
@@ -49,116 +47,81 @@ class VolumeExecutor:
                 if self._tradetime_marker is None:
                     self._tradetime_marker = trade_time
 
-                if trade_time >= self._tradetime_marker + 30:
-                    self._flush(trade_time)
+                if trade_time > self._tradetime_marker + config.FLUSH:
+                    self._tradetime_marker = trade_time
+                    self._flush()
 
-                if self._last_time is None:
-                    self._last_time = self._source.time()
-
-                if self._first_price is None:
-                    self._first_price = self._source.market_price()
-
-                if self._source.time().hour > self._last_time.hour:
-                    self.price_values.append((self._source.market_price() / self._first_price - 1) * 100)
-                    self.balance_values.append((self._source.current_total_usd() / USD_NOTIONAL - 1) * 100)
-                    self.times.append(self._source.time())
+                if self.graph and self._full_flag:
+                    self._update_graph()
 
                 if slot['side'] == 'A':
                     self._sell_usd += usd
                 if slot['side'] == 'B':
                     self._buy_usd += usd
 
-    def _flush(self, trade_time):
-        buy_buf = self._buy_volume_buffer
-        sell_buf = self._sell_volume_buffer
+    def _flush(self):
+        self._append_all()
 
-        if len(buy_buf) >= 2 and len(sell_buf) >= 1:
+        if self._all_full():
+            if not self._full_flag:
+                print('Buffers full: starting trading')
+                self._full_flag = True
             
-            latest_buy = buy_buf[-1]
-            latest_sell = sell_buf[-1]
-            last_buy = buy_buf[-2]
+            self._z_scores()
 
-            self.zb = self._z_score(list(buy_buf))
-            self.zs = self._z_score(list(sell_buf))
-            if self.zb >= THRESHOLD:
-                if latest_buy >= latest_sell:
-                    if latest_buy >= last_buy:
-                        print(f'BUY-VOLUME, MOMENTUM SIGNAL | z = {self.zb}')
-                        print('Balance: ', self._source.current_total_usd())
+            if self._sell_short_buf.average() > self._buy_short_buf.average(): # if the short-term sell volume average is higher than the short-term buy volume average, sell the whole position
+                if self._source.position_size() > 0:
+                    print('Selling pressure: selling full position')
+                    print(f'Balance: {self._source.current_total_usd()}')
+                    self.sell_full_position()
+            elif self._zb > config.THRESHOLD: # if there is a short-term buy volume spike, buy some
+                if self._available > 0:
+                    print('Buy volume spike: buying')
+                    print(f'Balance: {self._source.current_total_usd()}')
+                    self._partial_buy()
+                
+    def sell_full_position(self):
+        market_sell_price = float(self._source.last_sell_price())
+        sell_size = self._source.position_size()
+        self._available = self._available + sell_size * market_sell_price
 
-                        self._execute_buy_momentum()
-                    else:
-                        print(f'BUY-VOLUME FALLING AFTER MOMENTUM SIGNAL | z = {self.zb}')
-                        print('Balance: ', self._source.current_total_usd())
+        print(f'Sell size: {sell_size}')
+        self._source.create_sell_order(sell_size, 0.01)
 
-                        self._execute_buy_falling()
-                else:
-                    print(f'SELL DOMINANT DESPITE BUY SIGNAL | z = {self.zb}')
-                    print('Balance: ', self._source.current_total_usd())
-
-                    self._execute_sell_dominant()
-
-        self._buy_volume_buffer.append(self._buy_usd)
-        self._sell_volume_buffer.append(self._sell_usd)
-        #print('Flushed at: ', trade_time)
-        #print('Flush Count: ', self.flush_count)
-        #print('Buy buffer:', list(self._buy_volume_buffer)[-5:])
-        #print('Sell buffer:', list(self._sell_volume_buffer)[-5:])
-        #print('Balance: ', self._source.withdrawable())
-        self.flush_count += 1
-        self._buy_usd = 0.0
-        self._sell_usd = 0.0
-        self._tradetime_marker = trade_time
-
-
-    def _z_score(self, series):
-        if len(series) < 3:
-            return 0.0
-        mu = mean(series[:-1])
-        sig = stdev(series[:-1])
-        return (series[-1] - mu) / sig if sig else 0.0
-
-    def _execute_buy_momentum(self):
-        print('Executing BUY MOMENTUM trade...')
+    def _partial_buy(self):
+        combined_z = max(self._zb - self._zs, 0) # the z-score is a signed number, so if sell is below average and buy is above averge it will buy even more
 
         market_buy_price = float(self._source.last_buy_price())
-        buy_size = (self._available * min(self.zb / Z_SCORE_MAX, 1)) / market_buy_price
-        self._available = self._available - min(self.zb / Z_SCORE_MAX, 1) * self._available
+        buy_size = (self._available * min(combined_z / config.Z_SCORE_MAX), 1) / market_buy_price
+        self._available = self._available - min(combined_z / config.Z_SCORE_MAX, 1) * self._available
 
-        print('buy size: ', buy_size)
-        self._source.create_buy_order(buy_size)
+        print(f'Buy size: {buy_size}')
+        self._source.create_buy_order(buy_size, 0.01)
 
-    def _execute_buy_falling(self):
-        print('Executing BUY FALLING trade...')
+    def _z_scores(self):
+        self._zb = (self._buy_short_buf.average() - self._buy_long_buf.average()) / self._buy_long_buf.variance() ** 0.5
+        self._zs = (self._sell_short_buf.average() - self._sell_long_buf.average()) / self._sell_long_buf.variance() ** 0.5
 
-        buy_buf = self._buy_volume_buffer
-        latest_buy = buy_buf[-1]
-        last_buy = buy_buf[-2]
-        ratio = latest_buy / last_buy
-        if ratio <= 0.5 :
-            ratio = 1
-        
-        market_sell_price = float(self._source.last_sell_price())
-        sell_size = self._source.position_size() * (ratio)
-        self._available = self._available + sell_size * market_sell_price
-        print('sell size: ', sell_size)
+    def _update_graph(self):
+        if self.graph_marker is None:
+            self.graph_marker = self._source.time()
 
-        self._source.create_sell_order(sell_size)
+        if self._first_price is None:
+            self._first_price = self._source.market_price()
 
-    def _execute_sell_dominant(self):
-        print('Executing SELL DOMINANT trade...')
+        if self._source.time().timestamp() > self.graph_marker.timestamp() + config.GRAPH_STEP:
+            self.price_values.append((self._source.market_price() / self._first_price - 1) * 100)
+            self.balance_values.append((self._source.current_total_usd() / self.usd_notional - 1) * 100)
+            self.times.append(self._source.time())
 
-        sell_buf = self._sell_volume_buffer
-        buy_buf = self._buy_volume_buffer
-        latest_buy = buy_buf[-1]
-        latest_sell = sell_buf[-1]
-        ratio = latest_buy/latest_sell
-        if ratio <= 0.5 :
-            ratio = 1
-        
-        market_sell_price = float(self._source.last_sell_price())
-        sell_size = self._source.position_size() * (ratio)
-        self._available = self._available + sell_size * market_sell_price
-        print('sell size: ', sell_size)
+    def _append_all(self):
+        self._buy_short_buf.append(self._buy_usd)
+        self._sell_short_buf.append(self._sell_usd)
+        self._buy_long_buf.append(self._buy_usd)
+        self._sell_long_buf.append(self._sell_usd)
+        self._buy_usd = 0.0
+        self._sell_usd = 0.0
 
-        self._source.create_sell_order(sell_size)
+    def _all_full(self):
+        return self._buy_long_buf.is_full() and self._sell_long_buf.is_full()
+    
