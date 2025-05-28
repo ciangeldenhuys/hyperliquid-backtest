@@ -82,16 +82,16 @@ class VolumeExecutor:
             
             self._z_scores()
             self._rsi = self._calc_relative_strength_index()
-            if self._zs > config.THRESHOLD:
+            if self._zs > config.THRESHOLD_S:
                 if self._sell_short_buf.average() > self._buy_short_buf.average(): # if the short-term sell volume average is higher than the short-term buy volume average, sell the whole position
                     if self._source.position_size() > 0:
-                        if(self._rsi < 65):
+                        if(self._rsi < 50):
                             print('Selling pressure: selling full position')
                             print(f'Balance: {self._source.current_total_usd()}')
                             self.sell_full_position()
             elif self._zb > config.THRESHOLD: # if there is a short-term buy volume spike, buy some
                 if self._available > 0:
-                    if(self._rsi > 65):
+                    if(self._rsi > 50):
                         print('Buy volume spike: buying')
                         print('z-score: ', self._zb)
                         print(f'Balance: {self._source.current_total_usd()}')
@@ -139,7 +139,7 @@ class VolumeExecutor:
         self._buy_usd = 0.0
         self._sell_usd = 0.0
         self.count += 1
-        print(self.count)
+        #print(self.count)
 
     def _calc_relative_strength_index(self):
 
