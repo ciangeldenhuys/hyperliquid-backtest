@@ -1,6 +1,7 @@
 import source
 from strategy.utils.deque_avg_var import DequeAvgVar
 import strategy.config.volume_config as config
+from collections import deque
 
 class VolumeExecutor:
     def __init__(self, source: source.Source, usd_notional: float, graph: bool = True):
@@ -21,8 +22,12 @@ class VolumeExecutor:
         self._available = usd_notional
         self.usd_notional = usd_notional
 
+        self._rsi_prices_list = deque(maxlen=1000)
+        self._rsi = None
+
         self._zb = 0
         self._zs = 0
+        # self.count = 0.0  
 
         self.graph = graph
         if self.graph:
@@ -44,6 +49,11 @@ class VolumeExecutor:
                 size  = float(slot['sz'])
                 usd = price * size
 
+                # mid_price = self._source.market_price()
+                # if mid_price:
+                #     self._rsi_prices_list.append(mid_price)
+                #     self._rsi = self._calc_relative_strength_index()
+                
                 if self._tradetime_marker is None:
                     self._tradetime_marker = trade_time
 
@@ -58,6 +68,9 @@ class VolumeExecutor:
                     self._sell_usd += usd
                 if slot['side'] == 'B':
                     self._buy_usd += usd
+            
+            # self.count += 1
+            # print(self.count)
 
     def _flush(self):
         self._append_all()
@@ -76,7 +89,9 @@ class VolumeExecutor:
                     self.sell_full_position()
             elif self._zb > config.THRESHOLD: # if there is a short-term buy volume spike, buy some
                 if self._available > 0:
+                    # if(self._rsi > 65):
                     print('Buy volume spike: buying')
+                    print('z-score: ', self._zb)
                     print(f'Balance: {self._source.current_total_usd()}')
                     self._partial_buy()
                 
@@ -89,10 +104,10 @@ class VolumeExecutor:
         self._source.create_sell_order(sell_size, 0.01)
 
     def _partial_buy(self):
-        combined_z = max(self._zb - self._zs, 0) # the z-score is a signed number, so if sell is below average and buy is above averge it will buy even more
+        combined_z = max(self._zb, 0) # the z-score is a signed number, so if sell is below average and buy is above averge it will buy even more
 
         market_buy_price = float(self._source.last_buy_price())
-        buy_size = (self._available * min(combined_z / config.Z_SCORE_MAX), 1) / market_buy_price
+        buy_size = (self._available * min(combined_z / config.Z_SCORE_MAX, 1)) / market_buy_price
         self._available = self._available - min(combined_z / config.Z_SCORE_MAX, 1) * self._available
 
         print(f'Buy size: {buy_size}')
@@ -121,6 +136,31 @@ class VolumeExecutor:
         self._sell_long_buf.append(self._sell_usd)
         self._buy_usd = 0.0
         self._sell_usd = 0.0
+
+    def _calc_relative_strength_index(self):
+
+        if len(self._rsi_prices_list) < 1000:
+            return 0.0
+
+        gains = []
+        losses = []
+
+        for i in range(1, len(self._rsi_prices_list)):
+            delta = self._rsi_prices_list[i] - self._rsi_prices_list[i - 1]
+            if delta > 0:
+                gains.append(delta)
+            else:
+                losses.append(-delta)
+
+        avg_gain = sum(gains) / 1000 if gains else 0
+        avg_loss = sum(losses) / 1000 if losses else 0
+
+        if avg_loss == 0:
+            return 100.0
+
+        rs = avg_gain / avg_loss
+        return 100 - (100 / (1 + rs))
+
 
     def _all_full(self):
         return self._buy_long_buf.is_full() and self._sell_long_buf.is_full()
