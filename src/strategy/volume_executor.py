@@ -27,7 +27,7 @@ class VolumeExecutor:
 
         self._zb = 0
         self._zs = 0
-        # self.count = 0.0  
+        self.count = 0.0  
 
         self.graph = graph
         if self.graph:
@@ -49,10 +49,10 @@ class VolumeExecutor:
                 size  = float(slot['sz'])
                 usd = price * size
 
-                # mid_price = self._source.market_price()
-                # if mid_price:
-                #     self._rsi_prices_list.append(mid_price)
-                #     self._rsi = self._calc_relative_strength_index()
+                mid_price = self._source.market_price()
+                if mid_price:
+                       self._rsi_prices_list.append(mid_price)
+                       
                 
                 if self._tradetime_marker is None:
                     self._tradetime_marker = trade_time
@@ -66,12 +66,12 @@ class VolumeExecutor:
 
                 if slot['side'] == 'A':
                     self._sell_usd += usd
+
                 if slot['side'] == 'B':
                     self._buy_usd += usd
             
             # self.count += 1
             # print(self.count)
-
     def _flush(self):
         self._append_all()
 
@@ -81,19 +81,21 @@ class VolumeExecutor:
                 self._full_flag = True
             
             self._z_scores()
-
-            if self._sell_short_buf.average() > self._buy_short_buf.average(): # if the short-term sell volume average is higher than the short-term buy volume average, sell the whole position
-                if self._source.position_size() > 0:
-                    print('Selling pressure: selling full position')
-                    print(f'Balance: {self._source.current_total_usd()}')
-                    self.sell_full_position()
+            self._rsi = self._calc_relative_strength_index()
+            if self._zs > config.THRESHOLD:
+                if self._sell_short_buf.average() > self._buy_short_buf.average(): # if the short-term sell volume average is higher than the short-term buy volume average, sell the whole position
+                    if self._source.position_size() > 0:
+                        if(self._rsi < 65):
+                            print('Selling pressure: selling full position')
+                            print(f'Balance: {self._source.current_total_usd()}')
+                            self.sell_full_position()
             elif self._zb > config.THRESHOLD: # if there is a short-term buy volume spike, buy some
                 if self._available > 0:
-                    # if(self._rsi > 65):
-                    print('Buy volume spike: buying')
-                    print('z-score: ', self._zb)
-                    print(f'Balance: {self._source.current_total_usd()}')
-                    self._partial_buy()
+                    if(self._rsi > 65):
+                        print('Buy volume spike: buying')
+                        print('z-score: ', self._zb)
+                        print(f'Balance: {self._source.current_total_usd()}')
+                        self._partial_buy()
                 
     def sell_full_position(self):
         market_sell_price = float(self._source.last_sell_price())
@@ -136,6 +138,8 @@ class VolumeExecutor:
         self._sell_long_buf.append(self._sell_usd)
         self._buy_usd = 0.0
         self._sell_usd = 0.0
+        self.count += 1
+        print(self.count)
 
     def _calc_relative_strength_index(self):
 
