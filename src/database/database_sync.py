@@ -209,7 +209,7 @@ class DatabaseSync:
             conn = await DatabaseSync._get_async_connection()
             async with conn.cursor() as cur:
                 copy_query = """
-                    COPY trades (trade_id, coin_id, trade_time, price, quantity, side, best_match, trade_type)
+                    COPY trades (trade_id, coin_id, trade_time, price, quantity, side, trade_type)
                     FROM STDIN WITH CSV;
                 """
                 async with cur.copy(copy_query) as copy:
@@ -244,7 +244,9 @@ class DatabaseSync:
                     print(f"Failed to download {url}")
                     return
 
+                print(f'Downloading {url}')
                 downloaded_data = io.BytesIO(await response.read())
+                print(f'Finished downloading {url}')
                 downloaded_data.seek(0)
 
                 with zipfile.ZipFile(downloaded_data) as z:
@@ -252,15 +254,15 @@ class DatabaseSync:
 
                     with z.open(file_name) as csv_file:
                         cols = ['trade_id', 'price', 'quantity', 'quoteqty', 'timestamp', 'is_buyer_maker']
-                        chunk_iterator = pd.read_csv(csv_file, header=None, chunksize=50000, usecols=range(6), names=cols)
+                        chunk_iterator = pd.read_csv(csv_file, header=None, chunksize=50000, usecols=range(6), names=cols, skiprows=1)
                         tasks = []
                         count = 0
                         for chunk_df in chunk_iterator:
-                            chunk_df['trade_time'] = pd.to_datetime(chunk_df['timestamp'], unit='us')
+                            chunk_df['trade_time'] = pd.to_datetime(chunk_df['timestamp'], unit=('us' if trade_type == 'spot' else 'ms'))
                             chunk_df['side'] = ~chunk_df['is_buyer_maker']
 
-                            rows = chunk_df[['trade_id', 'trade_time', 'price', 'quantity', 'side', 'best_match']].values.tolist()
-                            rows = [(r[0], coin_id, r[1], r[2], r[3], r[4], r[5], trade_type) for r in rows]
+                            rows = chunk_df[['trade_id', 'trade_time', 'price', 'quantity', 'side']].values.tolist()
+                            rows = [(r[0], coin_id, r[1], r[2], r[3], r[4], trade_type) for r in rows]
 
                             tasks.append(asyncio.create_task(DatabaseSync._bulk_insert(rows)))
                             count += 1
@@ -369,10 +371,6 @@ class DatabaseSync:
 
 if __name__ == '__main__':
     download_list = [
-        ('XRPUSDT', 'spot'),
-        ('BNBUSDT', 'spot'),
-        ('TRXUSDT', 'spot'),
-        ('ADAUSDT', 'spot'),
-        ('SUIUSDT', 'spot')
+        ('ETHUSDT', 'futures'),
     ]
-    DatabaseSync.start_binance_download(download_list, datetime(2025, 1, 1), drop_index=True)
+    DatabaseSync.start_binance_download(download_list, datetime(2025, 1, 1), datetime(2025, 1, 2), drop_index=True)
