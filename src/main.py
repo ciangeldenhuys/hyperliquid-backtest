@@ -5,12 +5,14 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 if __name__ == '__main__':
-    ex = VolumeExecutor(source.Backtest('XRPUSDT', datetime(2025, 1, 1), datetime(2025, 2, 1), 1000), 1000)
+    src = source.Backtest('XRPUSDT', datetime(2025, 1, 1), datetime(2025, 2, 1), 1000)
+    ex = VolumeExecutor(src, 1000)
     try:
         ex.start()
     finally:
         print('Selling remaining positions')
         ex.sell_full_position()
+        print(f'Final balance: {src.current_total_usd()}')
         if ex.graph:
             print('Plotting results')
             fig, ax = plt.subplots()

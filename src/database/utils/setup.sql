@@ -16,7 +16,6 @@ CREATE TABLE trades (
     price NUMERIC NOT NULL,
     quantity NUMERIC NOT NULL,
     side BOOLEAN NOT NULL,
-    best_match BOOLEAN NOT NULL,
     trade_type TRADETYPE NOT NULL,
     PRIMARY KEY (trade_id, coin_id),
     CONSTRAINT coin_fk FOREIGN KEY (coin_id) REFERENCES coin_pair(coin_id)

@@ -72,6 +72,7 @@ class VolumeExecutor:
             
             # self.count += 1
             # print(self.count)
+
     def _flush(self):
         self._append_all()
 
@@ -81,17 +82,18 @@ class VolumeExecutor:
                 self._full_flag = True
             
             self._z_scores()
-            self._rsi = self._calc_relative_strength_index()
+            self._calc_relative_strength_index()
+
             if self._zs > config.THRESHOLD_S:
                 if self._sell_short_buf.average() > self._buy_short_buf.average(): # if the short-term sell volume average is higher than the short-term buy volume average, sell the whole position
                     if self._source.position_size() > 0:
-                        if(self._rsi < 50):
+                        if(self._rsi < 70):
                             print('Selling pressure: selling full position')
                             print(f'Balance: {self._source.current_total_usd()}')
                             self.sell_full_position()
             elif self._zb > config.THRESHOLD: # if there is a short-term buy volume spike, buy some
                 if self._available > 0:
-                    if(self._rsi > 50):
+                    if(self._rsi > 40):
                         print('Buy volume spike: buying')
                         print('z-score: ', self._zb)
                         print(f'Balance: {self._source.current_total_usd()}')
@@ -106,7 +108,7 @@ class VolumeExecutor:
         self._source.create_sell_order(sell_size, 0.01)
 
     def _partial_buy(self):
-        combined_z = max(self._zb, 0) # the z-score is a signed number, so if sell is below average and buy is above averge it will buy even more
+        combined_z = max(self._zb, 0)
 
         market_buy_price = float(self._source.last_buy_price())
         buy_size = (self._available * min(combined_z / config.Z_SCORE_MAX, 1)) / market_buy_price
@@ -139,7 +141,7 @@ class VolumeExecutor:
         self._buy_usd = 0.0
         self._sell_usd = 0.0
         self.count += 1
-        #print(self.count)
+        print(self.count)
 
     def _calc_relative_strength_index(self):
 
@@ -163,7 +165,7 @@ class VolumeExecutor:
             return 100.0
 
         rs = avg_gain / avg_loss
-        return 100 - (100 / (1 + rs))
+        self._rsi = 100 - (100 / (1 + rs))
 
 
     def _all_full(self):

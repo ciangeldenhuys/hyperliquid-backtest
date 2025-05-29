@@ -6,7 +6,7 @@ import psycopg
 from psycopg.connection import Connection
 from datetime import datetime
 
-READ_SIZE = 100000
+READ_SIZE = 10000000
 
 class Backtest(Source):
     def __init__(self, coin: str, start: datetime, end: datetime, withdrawable: float):
@@ -68,7 +68,7 @@ class Backtest(Source):
     def last_buy_price(self):
         return self._last_buy
 
-    def _get_rows(self, conn: Connection) -> list[tuple[float, float, bool, datetime]]:
+    def _get_rows(self, conn: Connection) -> list[tuple[float, float, bool, datetime, int]]:
         with conn.cursor() as cur:
             coin_id = db.get_coin_id(self.coin)
             cur.execute("""

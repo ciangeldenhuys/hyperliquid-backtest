@@ -251,11 +251,11 @@ class DatabaseSync:
                     file_name = z.namelist()[0]
 
                     with z.open(file_name) as csv_file:
-                        chunk_iterator = pd.read_csv(csv_file, header=None, chunksize=50000)
+                        cols = ['trade_id', 'price', 'quantity', 'quoteqty', 'timestamp', 'is_buyer_maker']
+                        chunk_iterator = pd.read_csv(csv_file, header=None, chunksize=50000, usecols=range(6), names=cols)
                         tasks = []
                         count = 0
                         for chunk_df in chunk_iterator:
-                            chunk_df.columns = ['trade_id', 'price', 'quantity', 'quoteqty', 'timestamp', 'is_buyer_maker', 'best_match']
                             chunk_df['trade_time'] = pd.to_datetime(chunk_df['timestamp'], unit='us')
                             chunk_df['side'] = ~chunk_df['is_buyer_maker']
 
@@ -288,6 +288,9 @@ class DatabaseSync:
         for pairing in coin_pairs:
             coin_pair, trade_type = pairing
             curr = start
+
+            if trade_type == 'futures':
+                trade_type = 'futures/um'
 
             if curr.day != 1:
                 stop = (start + relativedelta(months=1)).replace(day=1)
