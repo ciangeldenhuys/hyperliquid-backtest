@@ -10,3 +10,5 @@ LONG_BUF = 5 * (24 * 60 * 60) # seconds
 
 GRAPH_STEP = 6 * (60 * 60) # seconds
 
+THRESHOLD_RSI_B = 70
+THRESHOLD_RSI_S = 40
