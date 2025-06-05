@@ -2,6 +2,8 @@ import source
 from strategy.utils.deque_avg_var import DequeAvgVar
 import strategy.config.volume_config as config
 from collections import deque
+import numpy as np
+from datetime import datetime, timedelta
 
 class VolumeExecutor:
     def __init__(self, source: source.Source, usd_notional: float, graph: bool = True):
@@ -36,6 +38,9 @@ class VolumeExecutor:
             self.balance_values = []
             self.price_values = []
             self.times = []
+            
+        # Performance tracking
+        self._balance_history : list[tuple[datetime, float]] = []
 
     def start(self):
         print('Streaming trades')
@@ -87,13 +92,13 @@ class VolumeExecutor:
             if self._zs > config.THRESHOLD_S:
                 if self._sell_short_buf.average() > self._buy_short_buf.average(): # if the short-term sell volume average is higher than the short-term buy volume average, sell the whole position
                     if self._source.position_size() > 0:
-                        if(self._rsi < 70):
+                        if(self._rsi < config.THRESHOLD_RSI_B):
                             print('Selling pressure: selling full position')
                             print(f'Balance: {self._source.current_total_usd()}')
                             self.sell_full_position()
             elif self._zb > config.THRESHOLD: # if there is a short-term buy volume spike, buy some
                 if self._available > 0:
-                    if(self._rsi > 40):
+                    if(self._rsi > config.THRESHOLD_RSI_S):
                         print('Buy volume spike: buying')
                         print('z-score: ', self._zb)
                         print(f'Balance: {self._source.current_total_usd()}')
@@ -106,6 +111,10 @@ class VolumeExecutor:
 
         print(f'Sell size: {sell_size}')
         self._source.create_sell_order(sell_size, 0.01)
+        
+        # Track the trade
+        if sell_size > 0:
+            self._balance_history.append((self._source.time(), self._source.current_total_usd()))
 
     def _partial_buy(self):
         combined_z = max(self._zb, 0)
@@ -116,6 +125,10 @@ class VolumeExecutor:
 
         print(f'Buy size: {buy_size}')
         self._source.create_buy_order(buy_size, 0.01)
+        
+        # Track the trade
+        if buy_size > 0:
+            self._balance_history.append((self._source.time(), self._source.current_total_usd()))
 
     def _z_scores(self):
         self._zb = (self._buy_short_buf.average() - self._buy_long_buf.average()) / self._buy_long_buf.variance() ** 0.5
@@ -170,4 +183,26 @@ class VolumeExecutor:
 
     def _all_full(self):
         return self._buy_long_buf.is_full() and self._sell_long_buf.is_full()
+    
+    def calculate_max_drawdown(self):
+        """Calculate the maximum drawdown percentage"""
+        if len(self._balance_history) < 2:
+            return 0.0
+
+        balances = [b[1] for b in self._balance_history]
+        peak = balances[0]
+        max_drawdown = 0.0
+
+        for balance in balances:
+            if balance > peak:
+                peak = balance
+            drawdown = (peak - balance) / peak
+            if drawdown > max_drawdown:
+                max_drawdown = drawdown
+
+        return max_drawdown
+
+    def get_max_drawdown(self):
+        """Public method to get the max drawdown as a percentage (0.0-1.0)"""
+        return self.calculate_max_drawdown()
     
